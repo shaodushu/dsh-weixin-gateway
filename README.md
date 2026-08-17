@@ -7,7 +7,7 @@
          ↓ 文本消息
       AgentBridge（ctx.agents.create + agent.followup）
          ↓
-      dsh agent（DeepSeek-V4-Flash，公司网关 ai-platform.xwfintech.com）
+      dsh agent（DeepSeek-V4-Flash，公司内部 AI 网关）
          ↓ 回复
       sendMessageWeixin → 微信
 ```
