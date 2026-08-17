@@ -12,6 +12,144 @@
       sendMessageWeixin → 微信
 ```
 
+## 谁用哪条路
+
+| 你是 | 走哪条 | 说明 |
+|---|---|---|
+| **使用者**：只想把微信接入 dsh 当机器人用 | [一、安装 npm 包](#一-使用者从零安装) | 无需 clone 仓库；`dsh-weixin-gateway` 包内自带命令 |
+| **开发者**：clone 仓库改代码 / 调试 / 部署服务 | [二、仓库内开发](#二-开发者仓库内开发) | 用 `scripts/` 管理脚本，需要本地构建 |
+
+两者共用扫码登录、会话路由与踩坑经验，见文末。
+
+---
+
+## 一、使用者：从零安装
+
+> 本项目是 dsh（deepseek-harness）的**插件**，不是独立 CLI：不能 `npx dsh-weixin-gateway` 单独运行，必须由 dsh launcher 作为宿主加载。装进 profile 后即随 profile 自动生效，**无需每次 `--patch`**。
+
+### 前置条件（必须全部满足）
+
+1. **Node.js**（dsh 运行环境）
+2. **模型 provider**：在 `~/.dsh/settings.yaml` 配置 `llm-pi-ai`（公司网关）
+3. **微信端启用 ClawBot 插件（最容易漏）**：微信 → 我 → 设置 → 插件 → 启用 ClawBot；不启用则消息不会路由到网关，表现为"网关在跑但收不到任何消息"
+
+### 0. 安装 dsh-weixin 并准备环境（一次性）
+
+```bash
+# 1) 安装插件（自带 dsh-weixin 引导命令）
+npm install -g dsh-weixin-gateway
+
+# 2) 一键准备环境：检测/装 dsh → 创建 headless profile → 安装插件 → 验证
+dsh-weixin setup
+```
+
+`setup` 幂等，环境已就绪时重跑只是复查。它会提示最后两步手动项：配置模型 provider、微信端启用 ClawBot 插件。
+
+> 不装 bin 时的等价手动方式（可选）：
+> ```bash
+> npm install -g @deepseek-ai/dsh
+> dsh plugin --profile headless add @deepseek-ai/dsh-headless dsh-weixin-gateway
+> ```
+
+### 1. 扫码登录
+
+```bash
+dsh-weixin login
+```
+
+（等价：`dsh --profile headless --weixin-login`）
+
+终端显示 ASCII 二维码，手机微信扫码（需要配对码时按提示在终端输入手机显示的数字）。
+
+登录成功后：
+
+- 凭据落盘 `~/.openclaw/openclaw-weixin/accounts/<账号id>.json`
+- **同一进程自动进入网关轮询（保活）**。此时不要 Ctrl+C——登录进程退出后服务端会回收会话（-14），需重新扫码。
+
+### 2. 启动网关（常驻收消息 → dsh 回复）
+
+```bash
+dsh-weixin run
+```
+
+（等价：`dsh --profile headless --weixin-run`）
+
+- **不带参数**：自动使用第一个已登录账号（推荐）。
+- **指定账号**：`--weixin-run <accountId>`。
+- 账号 id 从哪来：扫码登录成功的输出会打印 `✅ 微信登录成功，账号: <id>`；也可查看 `~/.openclaw/weixin-dsh/accounts-index.json`。
+
+启动后网关会 `getUpdates` 长轮询收消息，消息交给 dsh agent 回复并实时发回微信。
+
+> 旧式 `--patch` 用法仍可用（`--patch node_modules/dsh-weixin-gateway/cordis.patch.yml ...`，路径相对当前目录解析），仅在你需要临时叠加其他 patch 时使用。
+
+### 换账号 / 重新扫码
+
+网关检测到 token 失效（getUpdates 返回 -14）连续 3 次会打印醒目报警和重新扫码指引。手动换账号：
+
+1. 停掉正在跑的网关进程（Ctrl+C）。
+2. 重新扫码：`dsh-weixin login`（新凭据落盘）。
+3. 再启动：`dsh-weixin run`。
+
+> 每次扫码登录会创建新 bot（`xxx@im.bot`），旧账号立即失效；如需清理，删除 `~/.openclaw/openclaw-weixin/accounts/` 下旧账号文件即可。
+
+### 自测（不依赖微信，开发者调试用）
+
+`session-test` 测试插件未打进 profile 层，需临时 `--patch` test.patch.yml：
+
+```bash
+dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --session-test per-user
+dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --session-test room
+```
+
+### 关于服务常驻
+
+npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.yml`，**不含** `scripts/` 管理脚本和 launchd 配置。需要开机自启、崩溃自动重启时：
+
+- 从本仓库拷贝 `scripts/weixin-gateway.sh`、`scripts/weixin-gateway-daemon.sh`、`docs/launchd/com.weixin-dsh.gateway.plist`；
+- 把 daemon 脚本顶部的 `DSH` / `PATCH` / `ACCOUNT` / `MODE` 变量改成你的本机值（见[开发者路径](#二-开发者仓库内开发)）。
+
+---
+
+## 二、开发者：仓库内开发
+
+### 构建
+
+```bash
+pnpm install && pnpm build
+```
+
+### 管理脚本（`scripts/weixin-gateway.sh`）
+
+仓库内日常操作统一走这个脚本：
+
+```bash
+./scripts/weixin-gateway.sh login            # 扫码登录（等价 dsh --weixin-login，登录后自动进保活轮询）
+./scripts/weixin-gateway.sh start            # 启动 launchd 服务（登录自启 + 崩溃重启）
+./scripts/weixin-gateway.sh stop             # 停止服务
+./scripts/weixin-gateway.sh restart          # 重启
+./scripts/weixin-gateway.sh status           # 状态（守护/网关 pid）
+./scripts/weixin-gateway.sh logs 50          # 最近日志
+./scripts/weixin-gateway.sh test per-user    # 会话路由测试（断言隔离）
+./scripts/weixin-gateway.sh test room        # 会话路由测试（断言共享）
+./scripts/weixin-gateway.sh demo "你好"      # 命令行注入闭环演示
+```
+
+- 架构：launchd → `scripts/weixin-gateway-daemon.sh`（while 循环守护，崩溃 5s 自动拉起）→ dsh 网关。
+- **换机器必改**：`weixin-gateway-daemon.sh` 顶部 `DSH` / `PATCH` / `ACCOUNT` / `MODE`、`docs/launchd/com.weixin-dsh.gateway.plist` 里的 daemon 脚本绝对路径，目前硬编码了作者本机值。
+- 会话模式：改 daemon 脚本里 `MODE=room|per-user` 后 restart。
+- launchd 日志：`~/.openclaw/weixin-dsh/launchd.{out,err}.log`；管理命令 `launchctl kickstart|bootout gui/$(id -u)/com.weixin-dsh.gateway`。
+
+---
+
+## 会话模式（room / per-user）
+
+| 模式 | 行为 | 适合 |
+|---|---|---|
+| `room`（默认） | 所有微信用户共享一个 agent 会话，上下文互通 | 单机器人公共号 |
+| `per-user` | 每个微信用户独立会话，完全隔离 | 多用户各自上下文 |
+
+命令行：`--session-mode per-user|room`（与 `--weixin-run` 同用）。会话跨进程/重启自动恢复（dsh-base 内置 JSONL 后端，`~/.dsh/sessions/`）。
+
 ## 架构
 
 | 模块 | 说明 |
@@ -22,115 +160,13 @@
 | `src/weixin/driver.ts` | 微信驱动：扫码登录 → `notifyStart` → `getUpdates` 长轮询 → 消息→agent→回复 |
 | `src/weixin/entry.ts` / `gateway.ts` | 命令行解析（`--weixin-login` / `--weixin-run`）与网关应用插件 |
 
-## 快速开始
-
-```bash
-pnpm install && pnpm build
-
-# 1. 扫码登录（登录成功后同一进程自动进入保活轮询）
-dsh --profile headless --patch ./weixin.patch.yml --weixin-login
-
-# 2. 已登录账号启动网关（长轮询收消息）
-dsh --profile headless --patch ./weixin.patch.yml --weixin-run <accountId>
-
-# 3. 会话路由自动化测试（不依赖微信）
-dsh --profile headless --patch ./test.patch.yml --session-test per-user
-dsh --profile headless --patch ./test.patch.yml --session-test room
-```
-
-## 作为 dsh 插件安装（npm）
-
-```bash
-# 发布后：
-dsh plugin --profile headless add dsh-weixin-gateway   # 或 pnpm --dir ~/.dsh/profiles/headless add dsh-weixin-gateway
-
-# 本地 tarball：
-pnpm --dir ~/.dsh/profiles/headless add ./dsh-weixin-gateway-0.1.0.tgz
-```
-
-安装后用包内 patch（包名路径解析）：
-
-```bash
-dsh --profile headless --patch node_modules/dsh-weixin-gateway/cordis.patch.yml --weixin-login
-dsh --profile headless --patch node_modules/dsh-weixin-gateway/cordis.patch.yml --weixin-run --session-mode per-user
-dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --session-test room
-```
-
-> 注意：`--patch` 路径相对当前目录解析；从 `~/.dsh/profiles/headless` 目录运行可省略前缀。
-
-## 日常使用手册
-
-### 扫码登录（终端 CLI）
-
-新开终端（或本会话用 `!` 前缀）执行，终端显示 ASCII 二维码，手机微信扫码：
-
-```bash
-cd ~/Code/weixin-dsh-gateway
-./scripts/weixin-gateway.sh login     # 推荐（等价于 dsh --weixin-login）
-```
-
-扫码确认后：登录成功 → **同一进程自动进入网关轮询**（保活，终端挂着运行，Ctrl+C 停止）。
-> 注意：登录进程退出后 session 会被服务端回收（-14），所以登录后不要关终端（或用 launchd 服务常驻）。
-
-### 服务管理（开机自启 + 崩溃重启）
-
-```bash
-./scripts/weixin-gateway.sh start     # 启动 launchd 服务（登录自启）
-./scripts/weixin-gateway.sh stop      # 停止
-./scripts/weixin-gateway.sh restart   # 重启
-./scripts/weixin-gateway.sh status    # 状态（守护/网关 pid）
-./scripts/weixin-gateway.sh logs 50   # 最近日志
-```
-
-- 架构：launchd → `scripts/weixin-gateway-daemon.sh`（while 循环守护，崩溃 5s 自动拉起）→ dsh 网关
-- 会话模式：改 `scripts/weixin-gateway-daemon.sh` 里的 `MODE=room|per-user` 后 restart
-
-### 换账号 / 重新扫码（token 失效时）
-
-```bash
-./scripts/weixin-gateway.sh stop      # 停服务
-./scripts/weixin-gateway.sh login     # 重新扫码（新凭据落盘）
-# Ctrl+C 退出登录进程后：
-./scripts/weixin-gateway.sh start     # 服务用新凭据启动
-```
-
-token 失效自动检测：网关检测到 -14（session timeout）连续 3 次会打印醒目报警 + 重新扫码指引。
-
-### 多用户会话模式
-
-```bash
-# 统一房间（默认）：所有用户共享一个 agent 会话，上下文互通
-./scripts/weixin-gateway.sh start     # 改 MODE=room
-
-# 每用户独立：每个微信用户独立会话（隔离）
-# 改 scripts/weixin-gateway-daemon.sh 的 MODE=per-user 后 restart
-```
-
-会话持久化：跨进程/重启自动恢复（dsh-base 内置 JSONL 后端，`~/.dsh/sessions/`）。
-
-### 自测（不依赖微信）
-
-```bash
-./scripts/weixin-gateway.sh test per-user   # 会话路由测试（断言隔离）
-./scripts/weixin-gateway.sh test room       # 断言共享
-./scripts/weixin-gateway.sh demo "你好"     # 命令行注入闭环演示
-```
-
-## 开机自启（macOS LaunchAgent）
-
-`~/Library/LaunchAgents/com.weixin-dsh.gateway.plist`（仓库 `docs/launchd/com.weixin-dsh.gateway.plist` 有副本）：
-- `RunAtLoad` 登录自启 + `KeepAlive` 崩溃重启
-- 管理：`launchctl kickstart gui/$(id -u)/com.weixin-dsh.gateway` 启动；`launchctl bootout gui/$(id -u)/com.weixin-dsh.gateway` 停止
-- 日志：`~/.openclaw/weixin-dsh/launchd.{out,err}.log`
-- 会话模式：改 plist 里 `--session-mode`（room / per-user）
-
 ## 关键经验（踩坑记录）
 
 1. **-14 session timeout 的真相**：网关进程的 `getUpdates` 长轮询既是拉消息也是**保活心跳**；登录进程退出后 session 被服务端回收。修复：登录成功后**同一进程立即接轮询**。独立测试请求（curl/node 单发）可能被服务端以并发限制拒绝（-14），**不代表网关状态**——判断网关是否工作要看网关日志，不要用独立请求测试。
 2. **重复扫码顶掉旧会话**：每次扫码登录创建新 bot（`xxx@im.bot`），旧会话立即失效。重新登录前删除旧账号文件。
 3. **`notifyStart` 是启动顺序的一部分**：原版 channel 启动时先 `notifyStart` 再轮询。
 4. **`ilink_appid: "bot"` 必须**在 package.json（`readPackageJsonFromDir` 向上查找）。
-5. 微信端 ClawBot 插件需要启用（`我 → 设置 → 插件`），否则消息不路由。
+5. **微信端 ClawBot 插件必须启用**（`我 → 设置 → 插件`），否则消息不路由。
 6. **流式发送勿双重发送**：`WeixinStreamingSender.flush()` 曾同时 queueSend 尾文、又把尾文放进返回的 `textParts`，调用方再发一次 → 每条回复重复（实测"问时间回两条"）。修复：尾文只由调用方统一发一次（flush 只返回不发送）。
 
 ## 开发状态
