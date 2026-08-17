@@ -29,11 +29,14 @@
     <string>room</string>
   </array>
 
-  <!-- 登录时启动；崩溃/退出自动重启（getUpdates 长轮询保持会话） -->
+  <!-- 登录时启动；崩溃（非零退出/被杀）自动重启。注：KeepAlive 布尔 true 在实测中不触发重启（Darwin 25），用字典形式 -->
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
 
   <!-- agent 的工作目录（AGENTS.md / .env 都从仓库解析） -->
   <key>WorkingDirectory</key>

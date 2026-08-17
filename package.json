@@ -1,6 +1,6 @@
 {
   "name": "dsh-weixin-gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "微信消息网关 dsh 插件：复用 Tencent openclaw-weixin 协议层，dsh (deepseek-harness) 作为执行层",
   "ilink_appid": "bot",
@@ -50,5 +50,10 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shaodushu/dsh-weixin-gateway.git"
   }
 }
