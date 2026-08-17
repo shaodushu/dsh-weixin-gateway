@@ -13,8 +13,12 @@
  * 关键机制（实测确认）：
  *   - `dsh plugin --profile X add <pkg>` 会自动初始化 profile，并把声明了
  *     dsh.bundle 的包自动 reconcile 进 profile 层 → 装完无需 --patch。
- *   - 插件进 profile 层后，dsh --profile headless --weixin-login/--weixin-run
- *     直接可用。
+ *   - dsh-headless / dsh-base 是 dsh 自带的 in-box bundle，**不需要**显式 add
+ *     （add dsh-headless 会触发 pnpm 解析它依赖的私有包
+ *     @deepseek-ai/dsh-code-runtime-worker，公共 registry 404 → 安装失败）。
+ *     只 add dsh-weixin-gateway 即可，--weixin-login/--weixin-run 直接可用。
+ *   - add 时显式 @<version>：裸名会被 pnpm 的 minor 范围 / minimumReleaseAge
+ *     限制装到旧版，显式版本号会进 minimumReleaseAgeExclude 而装到最新。
  */
 import { Command } from 'commander'
 import { spawn, spawnSync } from 'node:child_process'
@@ -22,7 +26,7 @@ import { spawn, spawnSync } from 'node:child_process'
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.2.1'
+const VERSION = '0.2.2'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -58,14 +62,18 @@ async function setup(): Promise<void> {
     console.log(`[dsh-weixin] dsh 已就绪${ver ? `（${ver}）` : ''}`)
   }
 
-  console.log('[dsh-weixin] 创建 headless profile 并安装插件与依赖层...')
+  console.log('[dsh-weixin] 创建 headless profile 并安装 dsh-weixin-gateway...')
+  // 只装 dsh-weixin-gateway：dsh-headless 是 dsh 自带的 in-box bundle，显式 add
+  // 反而触发 pnpm 解析它的私有依赖 @deepseek-ai/dsh-code-runtime-worker（公共
+  // registry 404）→ pnpm failed in profile directory。显式 @VERSION 让 pnpm
+  // 装到当前发布版（裸名会因 pnpm 不跨 minor / minimumReleaseAge 装到旧版）。
   const code = await runDsh([
     'plugin', '--profile', PROFILE, 'add',
-    '@deepseek-ai/dsh-headless', 'dsh-weixin-gateway',
+    `dsh-weixin-gateway@${VERSION}`,
   ])
   if (code !== 0) {
     console.error(`\n[dsh-weixin] 安装失败（退出码 ${code}）。常见原因：`)
-    console.error('  - @deepseek-ai scope 的 registry 需要 token（No authorization header was set）')
+    console.error('  - registry 不可达或需要 token（No authorization header was set）')
     console.error('  - pnpm 不在 PATH')
     console.error('  解决后重新运行: dsh-weixin setup')
     process.exit(code)
