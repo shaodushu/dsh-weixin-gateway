@@ -11,7 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 
-import { createGatewayAgent } from '../bridge.js'
+import { createGatewayAgent, resumeGatewayAgent } from '../bridge.js'
 import { logger } from './util/logger.js'
 
 export type SessionMode = 'per-user' | 'room'
@@ -31,13 +31,20 @@ export class SessionRouter {
     logger.info(`session-router: mode=${mode}`)
   }
 
-  /** 取某用户的 agent 会话（不存在则创建）。 */
+  /** 取某用户的 agent 会话：优先恢复持久化会话，否则新建。 */
   async getSession(userId: string): Promise<AgentHandle> {
     const key = this.mode === 'room' ? ROOM_KEY : userId
     let handle = this.handles.get(key)
     if (!handle) {
-      logger.info(`session-router: creating agent session for ${this.mode === 'room' ? 'room' : `user ${userId}`}`)
-      handle = await createGatewayAgent(this.ctx)
+      const label = this.mode === 'room' ? 'room' : `user ${userId}`
+      // 有持久化后端时尝试恢复（stable sessionId = key）
+      try {
+        handle = await resumeGatewayAgent(this.ctx, key)
+        logger.info(`session-router: resumed persisted session for ${label}`)
+      } catch {
+        handle = await createGatewayAgent(this.ctx, undefined, key)
+        logger.info(`session-router: created fresh agent session for ${label}`)
+      }
       this.handles.set(key, handle)
     }
     return handle
