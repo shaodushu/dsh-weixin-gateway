@@ -1,0 +1,33 @@
+# dsh-weixin-gateway 插件 bundle patch（发布版）。
+#
+# 安装后用法（dsh 环境）：
+#   dsh --profile headless --patch node_modules/dsh-weixin-gateway/cordis.patch.yml \
+#       --weixin-login
+#   dsh --profile headless --patch node_modules/dsh-weixin-gateway/cordis.patch.yml \
+#       --weixin-run --session-mode per-user
+#
+# 会话路由测试：
+#   dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml \
+#       --session-test per-user
+
+# 禁用官方 headless 任务模式（task 解析与 runner 都与微信网关互斥）
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- insert:
+    # 解析 --weixin-login / --weixin-run / --session-mode / --session-test
+    - id: weixin-startup
+      name: 'dsh-weixin-gateway/lib/weixin/entry.js'
+      inject: [cmdlineArgs]
+
+    # 执行登录或常驻网关
+    - id: weixin-gateway
+      name: 'dsh-weixin-gateway/lib/weixin/gateway.js'
+      inject: [weixinStartup, agentDefaultModel, agents, sessions, tools]
+      config:
+        mode: !!js ctx.weixinStartup.mode
+        accountId: !!js ctx.weixinStartup.accountId
+        sessionMode: !!js ctx.weixinStartup.sessionMode ?? 'room'

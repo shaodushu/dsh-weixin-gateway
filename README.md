@@ -32,7 +32,39 @@ dsh --profile headless --patch ./weixin.patch.yml --weixin-login
 
 # 2. 已登录账号启动网关（长轮询收消息）
 dsh --profile headless --patch ./weixin.patch.yml --weixin-run <accountId>
+
+# 3. 会话路由自动化测试（不依赖微信）
+dsh --profile headless --patch ./test.patch.yml --session-test per-user
+dsh --profile headless --patch ./test.patch.yml --session-test room
 ```
+
+## 作为 dsh 插件安装（npm）
+
+```bash
+# 发布后：
+dsh plugin --profile headless add dsh-weixin-gateway   # 或 pnpm --dir ~/.dsh/profiles/headless add dsh-weixin-gateway
+
+# 本地 tarball：
+pnpm --dir ~/.dsh/profiles/headless add ./dsh-weixin-gateway-0.1.0.tgz
+```
+
+安装后用包内 patch（包名路径解析）：
+
+```bash
+dsh --profile headless --patch node_modules/dsh-weixin-gateway/cordis.patch.yml --weixin-login
+dsh --profile headless --patch node_modules/dsh-weixin-gateway/cordis.patch.yml --weixin-run --session-mode per-user
+dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --session-test room
+```
+
+> 注意：`--patch` 路径相对当前目录解析；从 `~/.dsh/profiles/headless` 目录运行可省略前缀。
+
+## 开机自启（macOS LaunchAgent）
+
+`~/Library/LaunchAgents/com.weixin-dsh.gateway.plist`（仓库 `docs/launchd/com.weixin-dsh.gateway.plist` 有副本）：
+- `RunAtLoad` 登录自启 + `KeepAlive` 崩溃重启
+- 管理：`launchctl kickstart gui/$(id -u)/com.weixin-dsh.gateway` 启动；`launchctl bootout gui/$(id -u)/com.weixin-dsh.gateway` 停止
+- 日志：`~/.openclaw/weixin-dsh/launchd.{out,err}.log`
+- 会话模式：改 plist 里 `--session-mode`（room / per-user）
 
 ## 关键经验（踩坑记录）
 

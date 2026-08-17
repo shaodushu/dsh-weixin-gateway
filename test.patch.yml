@@ -14,11 +14,11 @@
 
 - insert:
     - id: weixin-startup
-      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/entry.js'
+      name: 'dsh-weixin-gateway/lib/weixin/entry.js'
       inject: [cmdlineArgs]
 
     - id: weixin-session-test
-      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/session-test.js'
+      name: 'dsh-weixin-gateway/lib/weixin/session-test.js'
       inject: [sessionTestStartup, agentDefaultModel, agents, sessions]
       config:
         mode: !!js ctx.sessionTestStartup.mode ?? 'per-user'
