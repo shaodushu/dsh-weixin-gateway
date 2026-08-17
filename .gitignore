@@ -4,3 +4,4 @@ dist/
 .DS_Store
 .credentials.yaml
 .env
+.github/workflows/ci.yml
