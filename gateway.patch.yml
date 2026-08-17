@@ -1,0 +1,18 @@
+# 微信网关 patch — 叠加在 headless profile 之上。
+#
+# 用法：dsh --profile headless --patch ./gateway.patch.yml "任务文本"
+#
+# 机制：headless bundle 自带的 headless-runner 被禁用，
+# 改为由我们的 weixin-gateway-runner 驱动（复用同一个 headlessStartup 任务输入）。
+
+# 禁用官方 headless runner（它只打印结果就退出；我们要接管驱动）
+- id: headless-runner
+  disabled: true
+
+- insert:
+    # 我们的 runner：从 headlessStartup 懒读任务，走 AgentBridge 注入执行层
+    - id: weixin-gateway-runner
+      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/runner.js'
+      inject: [headlessStartup]
+      config:
+        task: !!js ctx.headlessStartup.task
