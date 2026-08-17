@@ -97,3 +97,52 @@ export async function askAgent(handle: AgentHandle, text: string): Promise<AskRe
   await agent.whenIdle()
   return summarize(agent.session.events, firstSeq)
 }
+
+/** 流式回调。 */
+export interface StreamCallbacks {
+  /** 文本增量（assistant/chunk 的 text-delta，按块累积）。 */
+  onDelta?: (text: string) => void
+  /** 每个 turn 开始时。 */
+  onTurnStart?: () => void
+}
+
+/**
+ * 流式版本：注入消息后实时订阅 session/event 的 assistant/chunk（text-delta），
+ * 逐块回调调用方（用于微信增量发送）。返回与 askAgent 相同的聚合结果。
+ */
+export async function askAgentStreaming(
+  handle: AgentHandle,
+  text: string,
+  cbs: StreamCallbacks = {},
+): Promise<AskResult> {
+  const agent = handle.agent
+  const firstSeq = agent.session.seq
+
+  // 订阅会话事件流（agent 作用域 ctx；只在本 ask 的生命周期内有效）
+  const off = agent.ctx.on('session/event', (_session, event) => {
+    if (event.seq < firstSeq) return
+    if (event.type === 'assistant/chunk') {
+      const chunk = event.data.chunk
+      if (chunk.type === 'text-delta' && chunk.text) {
+        cbs.onDelta?.(chunk.text)
+      }
+      return
+    }
+    if (event.type === 'turn/start') {
+      cbs.onTurnStart?.()
+    }
+  })
+
+  try {
+    agent.followup(
+      createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      }),
+    )
+    await agent.whenIdle()
+    return summarize(agent.session.events, firstSeq)
+  } finally {
+    off()
+  }
+}

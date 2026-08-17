@@ -166,3 +166,21 @@ export async function uploadFileAttachmentToWeixin(params: {
     label: "uploadFileAttachmentToWeixin",
   });
 }
+
+/**
+ * Upload a local SILK voice file to the Weixin CDN.
+ * 实测：media_type=VOICE(4) 时 getUploadUrl 返回空（no upload URL），
+ * 变通方案：用 FILE(3) 上传，CDN 引用挂到 voice_item 上。
+ */
+export async function uploadVoiceToWeixin(params: {
+  filePath: string;
+  toUserId: string;
+  opts: WeixinApiOptions;
+  cdnBaseUrl: string;
+}): Promise<UploadedFileInfo> {
+  return uploadMediaToCdn({
+    ...params,
+    mediaType: UploadMediaType.FILE,
+    label: "uploadVoiceToWeixin",
+  });
+}
