@@ -48,8 +48,13 @@ dsh-weixin setup
 > 不装 bin 时的等价手动方式（可选）：
 > ```bash
 > npm install -g @deepseek-ai/dsh
-> dsh plugin --profile headless add @deepseek-ai/dsh-headless dsh-weixin-gateway
+> dsh plugin --profile headless add dsh-weixin-gateway@<版本号>   # 只装 dsh-weixin-gateway
 > ```
+>
+> 注意：**不要** `add @deepseek-ai/dsh-headless`——它是 dsh 自带的 in-box bundle，
+> 显式 add 会触发 pnpm 解析其依赖的私有包 `@deepseek-ai/dsh-code-runtime-worker`
+> （公共 registry 不存在）而失败。版本号建议显式指定，否则 pnpm 的 minor 范围
+> / minimumReleaseAge 可能装到旧版。
 
 ### 1. 扫码登录
 
