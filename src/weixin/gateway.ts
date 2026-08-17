@@ -12,6 +12,8 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import {
   listWeixinAccounts,
@@ -23,7 +25,7 @@ import {
 export const name = 'weixin-gateway'
 
 /** 需要 weixinStartup 提供命令后（懒配置）才启动。 */
-export const inject = ['weixinStartup', 'agentDefaultModel', 'agents', 'sessions']
+export const inject = ['weixinStartup', 'agentDefaultModel', 'agents', 'sessions', 'tools']
 
 /** 插件配置：由 weixin.patch.yml 从 weixinStartup 注入。 */
 export interface Config {
@@ -32,6 +34,30 @@ export interface Config {
 }
 
 export function apply(ctx: Context, config: Config): void {
+  // 注册"文生图"工具：agent 可自主调用生成图片，配合 [image:] 标记发微信
+  if (ctx.tools) {
+    ctx.tools.register(
+      defineTool({
+        name: 'generate_image',
+        description: '根据文字描述生成一张图片，返回图片的本地路径。生成的图片可以直接用 [image:路径] 标记发送给用户。',
+        parameters: {
+          prompt: { type: 'string', required: true, description: '图片内容描述（中文）' },
+        },
+        output: {
+          schema: { type: 'string' },
+          render: (_args, value) => [{ type: 'text', text: `图片已生成: ${value}` }],
+        },
+        async execute(args) {
+          const { generateImage } = await import('./ai-service.js')
+          return generateImage(args.prompt)
+        },
+      }),
+    )
+    console.log('[weixin-gateway] 已注册 generate_image 工具（文生图）')
+  } else {
+    console.warn('[weixin-gateway] tools 服务不可用，generate_image 工具未注册')
+  }
+
   void (async () => {
     try {
       if (config.mode === 'login') {
