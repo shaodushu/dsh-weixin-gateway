@@ -1,0 +1,28 @@
+# 微信网关 patch — 叠加在 headless profile 之上。
+#
+# 用法：
+#   dsh --profile headless --patch ./weixin.patch.yml --weixin-login   # 扫码登录
+#   dsh --profile headless --patch ./weixin.patch.yml --weixin-run     # 常驻网关
+#
+# 机制：禁用官方 headless-runner，插入我们的微信命令解析与网关插件。
+
+# 禁用官方 headless 任务模式（task 解析与 runner 都与微信网关互斥）
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- insert:
+    # 解析 --weixin-login / --weixin-run
+    - id: weixin-startup
+      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/entry.js'
+      inject: [cmdlineArgs]
+
+    # 执行登录或常驻网关
+    - id: weixin-gateway
+      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/gateway.js'
+      inject: [weixinStartup, agentDefaultModel, agents, sessions]
+      config:
+        mode: !!js ctx.weixinStartup.mode
+        accountId: !!js ctx.weixinStartup.accountId
