@@ -21,6 +21,9 @@ export const inject = ['cmdlineArgs']
 /** 本插件提供的服务名（gateway 插件注入它）。 */
 export const WEIXIN_STARTUP_SERVICE = 'weixinStartup'
 
+/** 会话路由测试服务名（session-test 插件注入它）。 */
+export const SESSION_TEST_STARTUP_SERVICE = 'sessionTestStartup'
+
 /** gateway 插件读取的值。 */
 export interface WeixinStartupValues {
   /** login：扫码登录；run：启动微信网关常驻轮询。 */
@@ -40,11 +43,13 @@ function weixinCommand(): Command {
     .option('--weixin-login [accountId]', '扫码登录微信账号（持久化凭据）')
     .option('--weixin-run [accountId]', '启动微信网关：长轮询收消息，dsh agent 回复')
     .option('--session-mode <mode>', '会话模式：per-user（每用户独立）/ room（统一房间，默认）', 'room')
+    .option('--session-test [mode]', '运行会话路由自动化测试（per-user/room，默认 per-user）')
     .addHelpText('after', `
 Examples:
   dsh --profile headless --patch ./weixin.patch.yml --weixin-login
   dsh --profile headless --patch ./weixin.patch.yml --weixin-run --session-mode per-user
-  dsh --profile headless --patch ./weixin.patch.yml --weixin-run --session-mode room
+  dsh --profile headless --patch ./weixin.patch.yml --session-test per-user
+  dsh --profile headless --patch ./weixin.patch.yml --session-test room
 `)
 }
 
@@ -55,6 +60,7 @@ export function apply(ctx: Context): void {
       weixinLogin?: string | boolean
       weixinRun?: string | boolean
       sessionMode?: string
+      sessionTest?: string | boolean
     }>()
     if (opts.weixinLogin) {
       ctx.provide(WEIXIN_STARTUP_SERVICE, {
@@ -69,6 +75,11 @@ export function apply(ctx: Context): void {
         accountId: typeof opts.weixinRun === 'string' ? opts.weixinRun : undefined,
         sessionMode: opts.sessionMode === 'per-user' ? 'per-user' : 'room',
       } satisfies WeixinStartupValues)
+      return
+    }
+    if (opts.sessionTest) {
+      const testMode = typeof opts.sessionTest === 'string' && opts.sessionTest === 'room' ? 'room' : 'per-user'
+      ctx.provide(SESSION_TEST_STARTUP_SERVICE, { mode: testMode })
       return
     }
     program.error('需要 --weixin-login 或 --weixin-run（--help 查看用法）')

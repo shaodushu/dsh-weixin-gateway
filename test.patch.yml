@@ -1,0 +1,24 @@
+# 会话路由自动化测试 patch — 叠加在 headless profile 之上。
+#
+# 用法：
+#   dsh --profile headless --patch ./test.patch.yml --session-test per-user
+#   dsh --profile headless --patch ./test.patch.yml --session-test room
+#
+# 模拟两个微信用户（小明/小红）对话，自动断言 per-user 隔离 / room 共享。
+
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- insert:
+    - id: weixin-startup
+      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/entry.js'
+      inject: [cmdlineArgs]
+
+    - id: weixin-session-test
+      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/session-test.js'
+      inject: [sessionTestStartup, agentDefaultModel, agents, sessions]
+      config:
+        mode: !!js ctx.sessionTestStartup.mode ?? 'per-user'
