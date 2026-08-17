@@ -131,12 +131,14 @@ token 失效自动检测：网关检测到 -14（session timeout）连续 3 次�
 3. **`notifyStart` 是启动顺序的一部分**：原版 channel 启动时先 `notifyStart` 再轮询。
 4. **`ilink_appid: "bot"` 必须**在 package.json（`readPackageJsonFromDir` 向上查找）。
 5. 微信端 ClawBot 插件需要启用（`我 → 设置 → 插件`），否则消息不路由。
+6. **流式发送勿双重发送**：`WeixinStreamingSender.flush()` 曾同时 queueSend 尾文、又把尾文放进返回的 `textParts`，调用方再发一次 → 每条回复重复（实测"问时间回两条"）。修复：尾文只由调用方统一发一次（flush 只返回不发送）。
 
 ## 开发状态
 
 - ✅ 文本消息收发闭环（端到端验证通过：微信 → dsh agent → 微信回复）
-- 🔜 媒体消息（图片/语音，协议层已移植，驱动未接）
-- 🔜 流式渐进回复（`reply-progress-sender` 已移植，未接入）
+- ✅ 媒体消息：入站（图片 AI 视觉描述 / 语音转文字 / 文件 / 视频）+ 出站（`[image:]` `[video:]` `[file:]` 标记，按 MIME 路由发送；图片/文件已实测）
+- ✅ 流式渐进回复：回复分段实时发送（markdown 安全分片 + 标记剥离，`WeixinStreamingSender`）
+- ⚠️ 语音条回复不支持：官方协议不渲染（Issue #78/#254 实测），`[tts:]` 文本并入文字回复
 - ⚠️ dsh 为 0.1.0-rc 预发布，接口可能破坏性变更
 
 ## 依赖

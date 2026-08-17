@@ -443,10 +443,11 @@ class WeixinStreamingSender {
     this.pending += tail
     this.extractMarkers()
 
+    // 尾文只在 textParts 中返回，由调用方（handleIncoming）统一发送一次；
+    // 这里不再 queueSend，否则同一段尾文会被发送两次（重复回复）。
     const textParts: string[] = []
     if (this.pending.trim()) {
       textParts.push(this.pending.trim())
-      this.queueSend(this.pending.trim())
       this.pending = ''
     }
     await this.sendChain

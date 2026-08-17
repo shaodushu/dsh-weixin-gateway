@@ -24,7 +24,7 @@ case "$cmd" in
   start)
     launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true
     launchctl kickstart "gui/$(id -u)/$LABEL"
-    echo "✅ 已启动（launchctl kickstart $LABEL）"
+    echo "✅ 已启动（launchctl kickstart ${LABEL}）"
     ;;
   stop)
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
