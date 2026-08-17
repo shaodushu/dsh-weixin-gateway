@@ -2,14 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   weixin-dsh-gateway 开机自启服务（macOS LaunchAgent）。
+  ProgramArguments 启动守护脚本（while 循环自动重启网关，兜底 KeepAlive 不生效的系统行为）。
 
   管理命令：
-    启动：   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.weixin-dsh.gateway.plist
-    停止：   launchctl bootout   gui/$(id -u) ~/Library/LaunchAgents/com.weixin-dsh.gateway.plist
-    查看：   launchctl print gui/$(id -u)/com.weixin-dsh.gateway
-    日志：   ~/.openclaw/weixin-dsh/launchd.out.log / launchd.err.log
-
-  会话模式：改 ProgramArguments 里的 --session-mode（room / per-user）。
+    启动：   launchctl kickstart gui/$(id -u)/com.weixin-dsh.gateway
+    停止：   launchctl bootout   gui/$(id -u)/com.weixin-dsh.gateway
+    日志：   ~/.openclaw/weixin-dsh/launchd.out.log / gateway-daemon.log
 -->
 <plist version="1.0">
 <dict>
@@ -18,36 +16,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/baymax/.local/share/mise/installs/node/22/bin/dsh</string>
-    <string>--profile</string>
-    <string>headless</string>
-    <string>--patch</string>
-    <string>/Users/baymax/Code/weixin-dsh-gateway/weixin.patch.yml</string>
-    <string>--weixin-run</string>
-    <string>34943af36ee6@im.bot</string>
-    <string>--session-mode</string>
-    <string>room</string>
+    <string>/bin/bash</string>
+    <string>/Users/baymax/Code/weixin-dsh-gateway/scripts/weixin-gateway-daemon.sh</string>
   </array>
 
-  <!-- 登录时启动；崩溃（非零退出/被杀）自动重启。注：KeepAlive 布尔 true 在实测中不触发重启（Darwin 25），用字典形式 -->
   <key>RunAtLoad</key>
   <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-
-  <!-- agent 的工作目录（AGENTS.md / .env 都从仓库解析） -->
-  <key>WorkingDirectory</key>
-  <string>/Users/baymax/Code/weixin-dsh-gateway</string>
-
-  <!-- launchd 默认 PATH 不含 mise/node，显式补齐（dsh shebang 依赖 env node） -->
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/Users/baymax/.local/share/mise/installs/node/22/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/baymax/.local/bin</string>
-  </dict>
 
   <key>StandardOutPath</key>
   <string>/Users/baymax/.openclaw/weixin-dsh/launchd.out.log</string>
