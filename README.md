@@ -58,6 +58,64 @@ dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --
 
 > 注意：`--patch` 路径相对当前目录解析；从 `~/.dsh/profiles/headless` 目录运行可省略前缀。
 
+## 日常使用手册
+
+### 扫码登录（终端 CLI）
+
+新开终端（或本会话用 `!` 前缀）执行，终端显示 ASCII 二维码，手机微信扫码：
+
+```bash
+cd ~/Code/weixin-dsh-gateway
+./scripts/weixin-gateway.sh login     # 推荐（等价于 dsh --weixin-login）
+```
+
+扫码确认后：登录成功 → **同一进程自动进入网关轮询**（保活，终端挂着运行，Ctrl+C 停止）。
+> ⚠️ 登录进程退出后 session 会被服务端回收（-14），所以登录后不要关终端（或用 launchd 服务常驻）。
+
+### 服务管理（开机自启 + 崩溃重启）
+
+```bash
+./scripts/weixin-gateway.sh start     # 启动 launchd 服务（登录自启）
+./scripts/weixin-gateway.sh stop      # 停止
+./scripts/weixin-gateway.sh restart   # 重启
+./scripts/weixin-gateway.sh status    # 状态（守护/网关 pid）
+./scripts/weixin-gateway.sh logs 50   # 最近日志
+```
+
+- 架构：launchd → `scripts/weixin-gateway-daemon.sh`（while 循环守护，崩溃 5s 自动拉起）→ dsh 网关
+- 会话模式：改 `scripts/weixin-gateway-daemon.sh` 里的 `MODE=room|per-user` 后 restart
+
+### 换账号 / 重新扫码（token 失效时）
+
+```bash
+./scripts/weixin-gateway.sh stop      # 停服务
+./scripts/weixin-gateway.sh login     # 重新扫码（新凭据落盘）
+# Ctrl+C 退出登录进程后：
+./scripts/weixin-gateway.sh start     # 服务用新凭据启动
+```
+
+token 失效自动检测：网关检测到 -14（session timeout）连续 3 次会打印醒目报警 + 重新扫码指引。
+
+### 多用户会话模式
+
+```bash
+# 统一房间（默认）：所有用户共享一个 agent 会话，上下文互通
+./scripts/weixin-gateway.sh start     # 改 MODE=room
+
+# 每用户独立：每个微信用户独立会话（隔离）
+# 改 scripts/weixin-gateway-daemon.sh 的 MODE=per-user 后 restart
+```
+
+会话持久化：跨进程/重启自动恢复（dsh-base 内置 JSONL 后端，`~/.dsh/sessions/`）。
+
+### 自测（不依赖微信）
+
+```bash
+./scripts/weixin-gateway.sh test per-user   # 会话路由测试（断言隔离）
+./scripts/weixin-gateway.sh test room       # 断言共享
+./scripts/weixin-gateway.sh demo "你好"     # 命令行注入闭环演示
+```
+
 ## 开机自启（macOS LaunchAgent）
 
 `~/Library/LaunchAgents/com.weixin-dsh.gateway.plist`（仓库 `docs/launchd/com.weixin-dsh.gateway.plist` 有副本）：
