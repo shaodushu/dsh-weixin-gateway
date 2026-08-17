@@ -1,6 +1,6 @@
 {
   "name": "dsh-weixin-gateway",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "微信消息网关 dsh 插件：复用 Tencent openclaw-weixin 协议层，dsh (deepseek-harness) 作为执行层",
   "ilink_appid": "bot",
