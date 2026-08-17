@@ -31,6 +31,7 @@ export const inject = ['weixinStartup', 'agentDefaultModel', 'agents', 'sessions
 export interface Config {
   mode: 'login' | 'run'
   accountId?: string
+  sessionMode?: 'per-user' | 'room'
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -70,7 +71,7 @@ export function apply(ctx: Context, config: Config): void {
         const onSignal = () => abort.abort()
         process.once('SIGINT', onSignal)
         process.once('SIGTERM', onSignal)
-        await runWeixinGateway(ctx, account, { abortSignal: abort.signal })
+        await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
         process.off('SIGINT', onSignal)
         process.off('SIGTERM', onSignal)
         const exit = ctx.get('appExit') as ((code: number) => void) | undefined
@@ -96,7 +97,7 @@ export function apply(ctx: Context, config: Config): void {
       process.once('SIGTERM', onSignal)
 
       console.log(`🚀 微信网关启动（账号 ${account.accountId}），Ctrl+C 停止...`)
-      await runWeixinGateway(ctx, account, { abortSignal: abort.signal })
+      await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
       process.off('SIGINT', onSignal)
       process.off('SIGTERM', onSignal)
       const exit = ctx.get('appExit') as ((code: number) => void) | undefined

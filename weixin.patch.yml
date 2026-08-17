@@ -26,3 +26,4 @@
       config:
         mode: !!js ctx.weixinStartup.mode
         accountId: !!js ctx.weixinStartup.accountId
+        sessionMode: !!js ctx.weixinStartup.sessionMode ?? 'room'

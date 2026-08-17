@@ -27,6 +27,8 @@ export interface WeixinStartupValues {
   mode: 'login' | 'run'
   /** 账号 id（可选，默认取已登录的第一个账号）。 */
   accountId?: string
+  /** 会话模式：per-user（每用户独立会话）/ room（统一房间，默认）。 */
+  sessionMode?: 'per-user' | 'room'
 }
 
 /** 微信网关的命令行定义。 */
@@ -37,17 +39,23 @@ function weixinCommand(): Command {
     .helpOption('-h, --help', 'show this help')
     .option('--weixin-login [accountId]', '扫码登录微信账号（持久化凭据）')
     .option('--weixin-run [accountId]', '启动微信网关：长轮询收消息，dsh agent 回复')
+    .option('--session-mode <mode>', '会话模式：per-user（每用户独立）/ room（统一房间，默认）', 'room')
     .addHelpText('after', `
 Examples:
   dsh --profile headless --patch ./weixin.patch.yml --weixin-login
-  dsh --profile headless --patch ./weixin.patch.yml --weixin-run
+  dsh --profile headless --patch ./weixin.patch.yml --weixin-run --session-mode per-user
+  dsh --profile headless --patch ./weixin.patch.yml --weixin-run --session-mode room
 `)
 }
 
 export function apply(ctx: Context): void {
   const program = weixinCommand()
   program.action(() => {
-    const opts = program.opts<{ weixinLogin?: string | boolean; weixinRun?: string | boolean }>()
+    const opts = program.opts<{
+      weixinLogin?: string | boolean
+      weixinRun?: string | boolean
+      sessionMode?: string
+    }>()
     if (opts.weixinLogin) {
       ctx.provide(WEIXIN_STARTUP_SERVICE, {
         mode: 'login',
@@ -59,6 +67,7 @@ export function apply(ctx: Context): void {
       ctx.provide(WEIXIN_STARTUP_SERVICE, {
         mode: 'run',
         accountId: typeof opts.weixinRun === 'string' ? opts.weixinRun : undefined,
+        sessionMode: opts.sessionMode === 'per-user' ? 'per-user' : 'room',
       } satisfies WeixinStartupValues)
       return
     }

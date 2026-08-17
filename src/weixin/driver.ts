@@ -43,6 +43,8 @@ import { downloadMediaFromItem } from './media/media-download.js'
 import { saveMediaBuffer } from './media-store.js'
 import { logger } from './util/logger.js'
 import { createGatewayAgent, askAgentStreaming } from '../bridge.js'
+import { SessionRouter } from './session-router.js'
+import type { SessionMode } from './session-router.js'
 
 /** 微信账号状态目录（本地，与 OpenClaw 隔离）。 */
 const WEIXIN_STATE_DIR = path.join(resolveStateDir(), 'weixin-dsh')
@@ -141,9 +143,10 @@ export interface ResolvedAccount {
 export async function runWeixinGateway(
   ctx: Context,
   account: ResolvedAccount,
-  opts: { abortSignal?: AbortSignal; verbose?: boolean } = {},
+  opts: { abortSignal?: AbortSignal; verbose?: boolean; sessionMode?: SessionMode } = {},
 ): Promise<void> {
   const { abortSignal } = opts
+  const sessionMode = opts.sessionMode ?? 'room'
   const accountId = account.accountId
   const baseUrl = account.baseUrl
   const token = account.token
@@ -161,9 +164,8 @@ export async function runWeixinGateway(
     logger.warn(`weixin-gateway: notifyStart failed (ignored): ${String(err)}`)
   }
 
-  // 常驻 agent 会话（多轮对话）
-  logger.info(`weixin-gateway: creating agent session for account ${accountId}`)
-  const agentHandle: AgentHandle = await createGatewayAgent(ctx)
+  // 会话路由：per-user（每用户独立会话）/ room（统一房间）
+  const router = new SessionRouter(ctx, sessionMode)
 
   // 每用户配置缓存（typing ticket 等）
   const configManager = new WeixinConfigManager(
@@ -185,7 +187,11 @@ export async function runWeixinGateway(
       getUpdatesBuf = resp.get_updates_buf ?? getUpdatesBuf
 
       for (const msg of resp.msgs ?? []) {
-        await handleIncoming(ctx, agentHandle, account, msg, baseUrl, token, configManager)
+        const userId = msg.from_user_id ?? ''
+        if (!userId) continue
+        // 按用户路由会话（per-user 独立 / room 共享）
+        const handle = await router.getSession(userId)
+        await handleIncoming(ctx, handle, account, msg, baseUrl, token, configManager)
       }
     } catch (err) {
       if (abortSignal?.aborted) break
@@ -195,8 +201,8 @@ export async function runWeixinGateway(
     }
   }
 
-  await agentHandle.dispose().catch(() => undefined)
-  logger.info(`weixin-gateway: stopped for ${accountId}`)
+  await router.disposeAll()
+  logger.info(`weixin-gateway: stopped for ${accountId} (${router.size} sessions)`)
 }
 
 /** 处理一条入站消息：文本/媒体 → askAgent → 回复。 */
