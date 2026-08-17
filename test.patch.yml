@@ -1,24 +1,21 @@
-# 会话路由自动化测试 patch — 叠加在 headless profile 之上。
+# 会话路由自动化测试 patch —— 叠加在已含 dsh-weixin-gateway bundle 的 profile 之上。
 #
 # 用法：
 #   dsh --profile headless --patch ./test.patch.yml --session-test per-user
 #   dsh --profile headless --patch ./test.patch.yml --session-test room
 #
-# 模拟两个微信用户（小明/小红）对话，自动断言 per-user 隔离 / room 共享。
+# 前提：profile 已通过 bundles 加载 dsh-weixin-gateway —— entry.js（weixin-startup）
+# 已注册 --session-test 并提供 sessionTestStartup；headless-startup/runner 已由
+# cordis.patch.yml 禁用。这里只需：
+#   1. 禁用等待 weixinStartup 服务的 weixin-gateway 插件（本场景不提供该服务）
+#   2. 插入会话路由测试插件
 
-- id: headless-startup
-  disabled: true
-
-- id: headless-runner
+- id: weixin-gateway
   disabled: true
 
 - insert:
-    - id: weixin-startup
-      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/entry.js'
-      inject: [cmdlineArgs]
-
     - id: weixin-session-test
-      name: '/Users/baymax/Code/weixin-dsh-gateway/lib/weixin/session-test.js'
+      name: 'dsh-weixin-gateway/lib/weixin/session-test.js'
       inject: [sessionTestStartup, agentDefaultModel, agents, sessions]
       config:
         mode: !!js ctx.sessionTestStartup.mode ?? 'per-user'

@@ -8,6 +8,10 @@
  *
  * 用法：dsh --profile headless --patch ./weixin.patch.yml --session-test [per-user|room]
  */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -27,8 +31,39 @@ export interface Config {
   mode: SessionMode
 }
 
+/**
+ * 测试专用 session key：room 用 router 的 ROOM_KEY，per-user 用两个测试用户 id。
+ * 这些会话在 JSONL 持久化后端落盘后，下次测试会 resume 旧上下文导致断言不稳
+ * （实测：room 残留 __room__ 后 A 首条回复为空）。因此测试开始前统一清理。
+ */
+const TEST_SESSION_KEYS = ['__room__', 'user-A-xiaoming', 'user-B-xiaohong']
+
+/** 清理测试专用持久化会话（遍历所有 cwd root），保证测试幂等可重复。 */
+function cleanupTestSessions(): void {
+  const home = process.env.DSH_HOME?.trim() || path.join(os.homedir(), '.dsh')
+  const sessionsRoot = path.join(home, 'sessions')
+  let roots: string[]
+  try {
+    roots = fs.readdirSync(sessionsRoot)
+  } catch {
+    return
+  }
+  let cleaned = 0
+  for (const root of roots) {
+    for (const key of TEST_SESSION_KEYS) {
+      const target = path.join(sessionsRoot, root, key)
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true })
+        cleaned++
+      }
+    }
+  }
+  logger.info(`session-test: cleaned test sessions (${cleaned} dirs) under ${sessionsRoot}`)
+}
+
 export function apply(ctx: Context, config: Config): void {
   void (async () => {
+    cleanupTestSessions()
     const router = new SessionRouter(ctx, config.mode)
     const results: string[] = []
     try {
