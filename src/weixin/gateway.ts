@@ -99,7 +99,9 @@ export function apply(ctx: Context, config: Config): void {
         if (accounts.length === 0) {
           throw new Error('没有已登录的微信账号，请先运行: --weixin-login')
         }
-        accountId = accounts[0]
+        // 索引按登录顺序 append，末位 = 最新登录。扫码登录会创建新 bot 账号
+        // （旧账号立即失效），默认必须用最新的，否则网关空转失效账号（-14）
+        accountId = accounts[accounts.length - 1]
         console.log(`使用已登录账号: ${accountId}`)
       }
 
