@@ -15,6 +15,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { resolveStateDir } from './storage/state-dir.js'
+
 /** 能力 id。 */
 export type AiCapabilityId = 'asr' | 'vision' | 'image' | 'tts'
 
@@ -46,24 +48,42 @@ export function capabilityDef(id: AiCapabilityId): AiCapabilityDef {
   return def
 }
 
-/** 仓库根目录（找 .env 用；源码为 src/weixin/.. = 仓库根，编译产物为 lib/weixin/.. = 包安装根）。 */
+/** 仓库根目录（找旧位置 .env 用；源码为 src/weixin/.. = 仓库根，编译产物为 lib/weixin/.. = 包安装根）。 */
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /**
+ * .env 固定位置：<stateDir>/weixin-dsh/.env。
+ *
+ * 为什么不用 REPO_ROOT/.env：同一插件存在多个 lib 副本（全局 CLI 装在
+ * npm 全局目录、profile bundle 装在 ~/.dsh/profiles/<p>/、仓库开发模式
+ * 在仓库根），每个副本的 REPO_ROOT 都不同——配置写一处、另一处读不到
+ * （实测：全局 CLI setup 引导读不到仓库 .env，4 个能力全判未配置）。
+ * 固定位置经 resolveStateDir() 解析，所有副本（daemon/CLI/profile）都
+ * 指向同一个 ~/.openclaw/weixin-dsh/.env，且测试可用 OPENCLAW_STATE_DIR 隔离。
+ */
+export function envPath(): string {
+  return path.join(resolveStateDir(), 'weixin-dsh', '.env')
+}
+
+/**
  * 极简 .env 加载（KEY=VALUE 逐行，不覆盖已存在的环境变量；envPath 供测试注入临时文件）。
+ * 默认加载固定位置，并兼容加载 REPO_ROOT/.env（0.2.x 旧位置兜底）。
  * 不做"已加载"缓存：文件很小，每次调用读一次无妨。
  */
-export function loadEnvFile(envPath: string = path.join(REPO_ROOT, '.env')): void {
-  try {
-    const raw = fs.readFileSync(envPath, 'utf8')
-    for (const line of raw.split('\n')) {
-      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
-      if (m && process.env[m[1]] === undefined) {
-        process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+export function loadEnvFile(p: string = envPath()): void {
+  for (const target of [p, p === envPath() ? path.join(REPO_ROOT, '.env') : '']) {
+    if (!target) continue
+    try {
+      const raw = fs.readFileSync(target, 'utf8')
+      for (const line of raw.split('\n')) {
+        const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
+        if (m && process.env[m[1]] === undefined) {
+          process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+        }
       }
+    } catch {
+      // .env 不存在时静默
     }
-  } catch {
-    // .env 不存在时静默
   }
 }
 
@@ -258,10 +278,12 @@ export function applyAiEnvAnswers(existing: string, answers: Record<string, stri
   return text
 }
 
-/** 写回仓库根 .env（权限 0600 与现有文件一致）。失败返回 false 由调用方打印手动指引。 */
+/** 写回固定位置 .env（权限 0600）。失败返回 false 由调用方打印手动指引。 */
 export function writeEnvFile(text: string): boolean {
   try {
-    fs.writeFileSync(path.join(REPO_ROOT, '.env'), text, { mode: 0o600 })
+    const p = envPath()
+    fs.mkdirSync(path.dirname(p), { recursive: true })
+    fs.writeFileSync(p, text, { mode: 0o600 })
     return true
   } catch {
     return false
@@ -274,7 +296,7 @@ export function aiEnvGuide(): string {
     (d) => `    ${d.prefix}BASE_URL / ${d.prefix}KEY / ${d.prefix}MODEL（${d.label}，默认 ${d.defaultModel}）`,
   ).join('\n')
   return [
-    `  AI 能力环境变量（写入包根目录 .env 或导出到环境）：`,
+    `  AI 能力环境变量（写入 ${envPath()} 或导出到环境）：`,
     rows,
     `  也可只配全局一组（4 个能力共用，模型用各自默认）：`,
     `    AI_GATEWAY_BASE_URL / AI_GATEWAY_KEY`,

@@ -20,6 +20,7 @@ import {
   AI_CAPABILITIES,
   applyAiEnvAnswers,
   buildAiConfigQuestions,
+  envPath,
   isCapabilityConfigured,
   loadEnvFile,
   requireCapabilityConfig,
@@ -134,6 +135,17 @@ describe('resolveCapabilityConfig（纯解析）', () => {
 })
 
 describe('loadEnvFile', () => {
+  it('默认路径 = 固定位置 <stateDir>/weixin-dsh/.env（不随 lib 副本漂移）', () => {
+    // OPENCLAW_STATE_DIR → resolveStateDir → envPath() 指向临时目录（函数内动态求值）
+    vi.stubEnv('OPENCLAW_STATE_DIR', tmpDir)
+    expect(envPath()).toBe(path.join(tmpDir, 'weixin-dsh', '.env'))
+    vi.stubEnv('AI_ASR_KEY', undefined)
+    fs.mkdirSync(path.join(tmpDir, 'weixin-dsh'), { recursive: true })
+    fs.writeFileSync(envPath(), 'AI_ASR_KEY=sk-fixed-location\n')
+    loadEnvFile() // 无参 → 固定位置
+    expect(process.env.AI_ASR_KEY).toBe('sk-fixed-location')
+  })
+
   it('从临时 .env 注入；已存在的环境变量不被覆盖', () => {
     const envPath = path.join(tmpDir, '.env')
     fs.writeFileSync(envPath, 'AI_ASR_BASE_URL=https://from-file/v1\nAI_ASR_KEY=sk-file\n')
