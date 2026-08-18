@@ -23,6 +23,7 @@ import {
   envPath,
   isCapabilityConfigured,
   loadEnvFile,
+  reloadAiEnv,
   requireCapabilityConfig,
   resolveCapabilityConfig,
   summarizeAiConfig,
@@ -166,6 +167,25 @@ describe('loadEnvFile', () => {
     fs.writeFileSync(envPath, 'AI_IMAGE_KEY=sk-2\n')
     loadEnvFile(envPath) // 已存在不覆盖
     expect(process.env.AI_IMAGE_KEY).toBe('sk-1')
+  })
+
+  it('reloadAiEnv：重载后反映 .env 最新内容（清除/新增均生效），真实环境变量不受影响', () => {
+    vi.stubEnv('OPENCLAW_STATE_DIR', tmpDir)
+    const p = envPath()
+    fs.mkdirSync(path.dirname(p), { recursive: true })
+    vi.stubEnv('AI_ASR_KEY', undefined)
+    vi.stubEnv('AI_ASR_MODEL', undefined)
+    vi.stubEnv('AI_TTS_MODEL', undefined)
+    fs.writeFileSync(p, 'AI_ASR_KEY=sk-first\n')
+    loadEnvFile()
+    expect(process.env.AI_ASR_KEY).toBe('sk-first')
+    // 磁盘内容变化：asr 被清除、tts 新增；真实环境变量（export 的）不受影响
+    vi.stubEnv('AI_IMAGE_KEY', 'sk-exported') // 模拟用户 export
+    fs.writeFileSync(p, 'AI_TTS_MODEL=MyTTS\n')
+    reloadAiEnv()
+    expect(process.env.AI_ASR_KEY).toBeUndefined() // 清除生效
+    expect(process.env.AI_TTS_MODEL).toBe('MyTTS') // 新增生效
+    expect(process.env.AI_IMAGE_KEY).toBe('sk-exported') // export 的值不被动
   })
 })
 

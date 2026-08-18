@@ -65,6 +65,9 @@ export function envPath(): string {
   return path.join(resolveStateDir(), 'weixin-dsh', '.env')
 }
 
+/** 记录每个加载目标（文件路径）注入过的键（reloadAiEnv 只清默认路径的，不误删其他来源）。 */
+const injectedByFile = new Map<string, Set<string>>()
+
 /**
  * 极简 .env 加载（KEY=VALUE 逐行，不覆盖已存在的环境变量；envPath 供测试注入临时文件）。
  * 默认加载固定位置，并兼容加载 REPO_ROOT/.env（0.2.x 旧位置兜底）。
@@ -79,12 +82,34 @@ export function loadEnvFile(p: string = envPath()): void {
         const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
         if (m && process.env[m[1]] === undefined) {
           process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+          let keys = injectedByFile.get(target)
+          if (!keys) {
+            keys = new Set()
+            injectedByFile.set(target, keys)
+          }
+          keys.add(m[1])
         }
       }
     } catch {
       // .env 不存在时静默
     }
   }
+}
+
+/**
+ * 丢弃此前从固定位置 .env 注入的键并重新加载（setup 写入 .env 后刷新内存
+ * 快照用：不重载则摘要/后续判定仍显示旧值——实测 r 重配后摘要显示全局、
+ * x 清除后摘要仍显示旧能力级配置）。真实环境变量（export 的）不受影响。
+ */
+export function reloadAiEnv(): void {
+  const p = envPath()
+  for (const [target, keys] of injectedByFile) {
+    if (target === p) {
+      for (const k of keys) delete process.env[k]
+    }
+  }
+  injectedByFile.set(p, new Set())
+  loadEnvFile()
 }
 
 /** 解析后的单能力配置。 */

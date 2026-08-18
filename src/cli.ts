@@ -34,6 +34,7 @@ import {
   buildAiConfigQuestions,
   envPath,
   loadEnvFile,
+  reloadAiEnv,
   summarizeAiConfig,
   writeEnvFile,
 } from './weixin/ai-config.js'
@@ -42,7 +43,7 @@ import type { AiCapabilityQuestions } from './weixin/ai-config.js'
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.3.1'
+const VERSION = '0.3.2'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -238,6 +239,7 @@ async function configureAiInteractively(): Promise<void> {
   if (next === existing) {
     console.log('\n[dsh-weixin] AI 配置无变化')
   } else if (writeEnvFile(next)) {
+    reloadAiEnv() // 刷新内存快照，摘要显示写入后的实际配置
     console.log(`\n[dsh-weixin] 已写入 AI 配置: ${envPath()}`)
   } else {
     console.log(`\n[dsh-weixin] 无法写入 ${envPath()}（权限？），请手动添加以下内容：`)
