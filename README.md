@@ -107,7 +107,8 @@ npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.ym
 
 同一账号同一时刻**只能有一个网关实例**——`getupdates` 长轮询既是收消息也是会话保活心跳，两个实例同时轮询会互相顶掉对方会话（`-14 session timeout`，重新扫码也无效）。网关启动（`run` / `login` 保活）时会对账号取互斥锁（`~/.openclaw/weixin-dsh/run-<accountId>.lock`）：
 
-- **冲突**：已有实例在跑时，新实例立即报错退出，提示停掉旧实例（前台实例 Ctrl+C；launchd 守护 `./scripts/weixin-gateway.sh stop`）；
+- **冲突**：`run` 遇已有实例时立即报错退出，提示停掉旧实例（前台实例 Ctrl+C；launchd 守护 `./scripts/weixin-gateway.sh stop`）；
+- **`login` 例外**：登录 = 主动换会话，`dsh-weixin login` 会自动停掉 launchd 守护释放锁（停不掉的才是前台实例，需要手动 Ctrl+C），登录结束后自动交回 daemon 常驻；
 - **后台守护**：launchd daemon 检测到前台实例持锁时退避 60s 重试，待其退出后自动接管；
 - **残留恢复**：实例崩溃（kill -9 / OOM）留下的锁会在下次启动时自动识别并覆盖，无需手工清理。
 
@@ -156,7 +157,7 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 ./scripts/weixin-gateway.sh demo "你好"      # 命令行注入闭环演示
 ```
 
-> **会话失效（-14）后恢复**：`./scripts/weixin-gateway.sh relogin` 一条命令搞定——先停 daemon 释放实例锁，扫码登录（成功后自动进入保活轮询），Ctrl+C 后自动重新拉起 daemon 常驻。
+> **会话失效（-14）后恢复**：直接 `dsh-weixin login` 一条命令——自动停掉后台守护释放锁、出二维码扫码，Ctrl+C 后自动交回 daemon 常驻，全程不用手动启停。仓库内也可以用 `./scripts/weixin-gateway.sh relogin`（等价流程）。
 
 - 架构：launchd → `scripts/weixin-gateway-daemon.sh`（while 循环守护，崩溃 5s 自动拉起）→ dsh 网关。
 - **换机器必改**：`weixin-gateway-daemon.sh` 顶部 `DSH` / `PATCH` / `ACCOUNT` / `MODE`、`docs/launchd/com.weixin-dsh.gateway.plist` 里的 daemon 脚本绝对路径，目前硬编码了作者本机值。
