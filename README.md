@@ -101,7 +101,7 @@ dsh-weixin run
 npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.yml`，**不含** `scripts/` 管理脚本和 launchd 配置。需要开机自启、崩溃自动重启时：
 
 - 从本仓库拷贝 `scripts/weixin-gateway.sh`、`scripts/weixin-gateway-daemon.sh`、`docs/launchd/com.weixin-dsh.gateway.plist`；
-- 把 daemon 脚本顶部的 `DSH` / `PATCH` / `ACCOUNT` / `MODE` 变量改成你的本机值（见[开发者路径](#二-开发者仓库内开发)）。
+- 把 daemon 脚本顶部的 `DSH` / `PATCH` / `MODE` 变量改成你的本机值（见[开发者路径](#二-开发者仓库内开发)）。账号不固定：扫码登录会创建新账号（`xxx@im.bot`），daemon 自动取最新已登录账号。
 
 ### 实例互斥（同一账号只能一个网关）
 
@@ -160,7 +160,7 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 > **会话失效（-14）后恢复**：直接 `dsh-weixin login` 一条命令——自动停掉后台守护释放锁、出二维码扫码，Ctrl+C 后自动交回 daemon 常驻，全程不用手动启停。仓库内也可以用 `./scripts/weixin-gateway.sh relogin`（等价流程）。
 
 - 架构：launchd → `scripts/weixin-gateway-daemon.sh`（while 循环守护，崩溃 5s 自动拉起）→ dsh 网关。
-- **换机器必改**：`weixin-gateway-daemon.sh` 顶部 `DSH` / `PATCH` / `ACCOUNT` / `MODE`、`docs/launchd/com.weixin-dsh.gateway.plist` 里的 daemon 脚本绝对路径，目前硬编码了作者本机值。
+- **换机器必改**：`weixin-gateway-daemon.sh` 顶部 `DSH` / `PATCH` / `MODE`、`docs/launchd/com.weixin-dsh.gateway.plist` 里的 daemon 脚本绝对路径，目前硬编码了作者本机值。
 - 会话模式：改 daemon 脚本里 `MODE=room|per-user` 后 restart。
 - launchd 日志：`~/.openclaw/weixin-dsh/launchd.{out,err}.log`；管理命令 `launchctl kickstart|bootout gui/$(id -u)/com.weixin-dsh.gateway`。
 

@@ -133,6 +133,9 @@ export interface StreamCallbacks {
   onTurnStart?: () => void
 }
 
+/** 一次 ask 的 LLM 推理超时（秒）。 */
+const ASK_TIMEOUT_SEC = 180
+
 /**
  * 流式版本：注入消息后实时订阅 session/event 的 assistant/chunk（text-delta），
  * 逐块回调调用方（用于微信增量发送）。返回与 askAgent 相同的聚合结果。
@@ -160,6 +163,19 @@ export async function askAgentStreaming(
     }
   })
 
+  // 超时保护：公司 AI 网关偶发挂起会让 whenIdle() 永不 resolve，而网关轮询
+  // 串行 await 本条消息 → 单条消息卡死整个网关（实测：收到消息后 16 分钟
+  // 无任何日志、期间所有消息排队）。超时后抛错让调用方回复"处理失败"并解冻
+  // 轮询。局限：底层 LLM 推理无法中止，超时后仍在后台跑（其产出不再被聚合，
+  // 事件订阅已随 finally 移除），属可接受的保底。
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`LLM 推理超时（>${ASK_TIMEOUT_SEC}s），请稍后再试`)),
+      ASK_TIMEOUT_SEC * 1000,
+    )
+  })
+
   try {
     agent.followup(
       createUserMessage({
@@ -167,9 +183,10 @@ export async function askAgentStreaming(
         source: { kind: 'user' },
       }),
     )
-    await agent.whenIdle()
+    await Promise.race([agent.whenIdle(), timeout])
     return summarize(agent.session.events, firstSeq)
   } finally {
+    clearTimeout(timer)
     off()
   }
 }
