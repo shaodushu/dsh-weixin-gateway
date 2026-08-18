@@ -24,7 +24,8 @@ import { Command } from 'commander'
 import { spawn, spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { findHeldGatewayLocks, printLockConflict } from './weixin/run-lock.js'
+import { findHeldGatewayLocks, findConflict, printLockConflict } from './weixin/run-lock.js'
+import { versionGt } from './version.js'
 
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
@@ -46,18 +47,6 @@ function runDsh(args: string[]): Promise<number> {
 /** 短眠。 */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** semver 比较：a > b。 */
-function versionGt(a: string, b: string): boolean {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] ?? 0
-    const y = pb[i] ?? 0
-    if (x !== y) return x > y
-  }
-  return false
 }
 
 /**
@@ -108,7 +97,7 @@ function detectDsh(): boolean {
  */
 function precheckInstance(accountId?: string): boolean {
   const held = findHeldGatewayLocks()
-  const conflict = accountId ? held.find((h) => h.accountId === accountId) : held[0]
+  const conflict = findConflict(held, accountId)
   if (conflict) {
     printLockConflict(conflict.pid)
     return false
@@ -222,7 +211,7 @@ program
     // 登录 = 换会话：若已有实例在跑（多为 launchd daemon 拉起的网关），
     // 自动停掉守护释放锁，让扫码直接进行；停不掉的前台实例才报错。
     const held = findHeldGatewayLocks()
-    const conflict = accountId ? held.find((h) => h.accountId === accountId) : held[0]
+    const conflict = findConflict(held, accountId)
     if (conflict) {
       stopDaemon()
       // bootout 是异步的（launchd 先终止进程、网关退出时才释放锁）：

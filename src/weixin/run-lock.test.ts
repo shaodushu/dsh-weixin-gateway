@@ -13,7 +13,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
-import { acquireRunLock, lockPath, releaseRunLock } from './run-lock.js'
+import { acquireRunLock, findConflict, findHeldGatewayLocks, lockPath, releaseRunLock } from './run-lock.js'
 
 let stateDir: string
 const children: ReturnType<typeof spawn>[] = []
@@ -26,7 +26,7 @@ function writeLockFile(accountId: string, content: string): void {
 }
 
 /** spawn 一个写锁后常驻的子进程；stdout 输出 READY 表示已就绪。返回其 PID。 */
-function spawnHolder(argv0: string, extraCode = ''): Promise<number> {
+function spawnHolder(argv0: string, extraCode = '', accountId = 'acct-conflict'): Promise<number> {
   return new Promise((resolve, reject) => {
     const code = `
       const fs = require('node:fs');
@@ -39,7 +39,7 @@ function spawnHolder(argv0: string, extraCode = ''): Promise<number> {
     `
     const child = spawn(process.execPath, ['-e', code], {
       argv0,
-      env: { ...process.env, LOCK_PATH: lockPath('acct-conflict') },
+      env: { ...process.env, LOCK_PATH: lockPath(accountId) },
       stdio: ['ignore', 'pipe', 'inherit'],
     })
     children.push(child)
@@ -130,5 +130,60 @@ describe('acquireRunLock', () => {
     expect(acquireRunLock('acct-broken')).toEqual({ ok: true })
     writeLockFile('acct-broken2', 'not-a-pid\njunk\n')
     expect(acquireRunLock('acct-broken2')).toEqual({ ok: true })
+  })
+})
+
+describe('findHeldGatewayLocks', () => {
+  it('扫描所有被存活网关实例持有的锁（run/login 两种命令行）', async () => {
+    const pidA = await spawnHolder('node --weixin-run holder', '', 'acct-scan-a')
+    const pidB = await spawnHolder('node --weixin-login holder', '', 'acct-scan-b')
+    const held = findHeldGatewayLocks()
+    expect(held).toHaveLength(2)
+    expect(held.find((h) => h.accountId === 'acct-scan-a')?.pid).toBe(String(pidA))
+    expect(held.find((h) => h.accountId === 'acct-scan-b')?.pid).toBe(String(pidB))
+  })
+
+  it('跳过残留锁（PID 已死）与非网关进程持有的锁', async () => {
+    writeLockFile('acct-dead', '99999999\n')
+    await spawnHolder(process.execPath, '', 'acct-plain')
+    expect(findHeldGatewayLocks()).toEqual([])
+  })
+
+  it('锁目录不存在时返回空数组', () => {
+    expect(findHeldGatewayLocks()).toEqual([])
+  })
+
+  it('只认 run-*.lock：忽略目录内其他文件/目录', async () => {
+    const dir = path.join(stateDir, 'weixin-dsh')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'accounts-index.json'), '{}')
+    fs.writeFileSync(path.join(dir, 'run-no-dot-lock'), 'junk\n')
+    fs.mkdirSync(path.join(dir, 'run-dir.lock'))
+    const pid = await spawnHolder('node --weixin-run holder', '', 'acct-real')
+    const held = findHeldGatewayLocks()
+    expect(held).toHaveLength(1)
+    expect(held[0]!.accountId).toBe('acct-real')
+    expect(held[0]!.pid).toBe(String(pid))
+  })
+})
+
+describe('findConflict', () => {
+  const held = [
+    { accountId: 'a@im.bot', pid: '1' },
+    { accountId: 'b@im.bot', pid: '2' },
+  ]
+
+  it('未指定账号时取任一持锁实例（无参 run/login 一律拦截）', () => {
+    expect(findConflict(held)).toEqual({ accountId: 'a@im.bot', pid: '1' })
+  })
+
+  it('指定账号时精确匹配该账号', () => {
+    expect(findConflict(held, 'b@im.bot')).toEqual({ accountId: 'b@im.bot', pid: '2' })
+    expect(findConflict(held, 'c@im.bot')).toBeUndefined()
+  })
+
+  it('空列表返回 undefined', () => {
+    expect(findConflict([], 'a@im.bot')).toBeUndefined()
+    expect(findConflict([])).toBeUndefined()
   })
 })

@@ -24,20 +24,9 @@ LOG=~/.openclaw/weixin-dsh/gateway-daemon.log
 # launchd 最小环境不继承 shell 配置；显式补 PATH（dsh shebang 需要 env node）
 export PATH="/Users/baymax/.local/share/mise/installs/node/22/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/baymax/.local/bin"
 
-# 锁检查：任一账号有存活网关实例（前台手动 run 等）时返回其 PID，无则空。
-lock_held_by() {
-  local f pid
-  for f in "$HOME"/.openclaw/weixin-dsh/run-*.lock; do
-    [ -f "$f" ] || continue
-    pid=$(head -1 "$f" 2>/dev/null | tr -d '[:space:]')
-    [ -n "$pid" ] || continue
-    if ps -p "$pid" -o command= 2>/dev/null | grep -q 'weixin-\(login\|run\)'; then
-      echo "$pid"
-      return 0
-    fi
-  done
-  return 1
-}
+# 锁检查与 node 侧 src/weixin/run-lock.ts 同语义（脚本与测试共用）
+# shellcheck disable=SC1091
+source "$(dirname "$0")/weixin-lock-check.sh"
 
 echo "[$(date '+%F %T')] daemon started (mode=$MODE, 账号取最新已登录)" >> "$LOG"
 

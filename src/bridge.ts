@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
+import { raceWithTimeout } from './with-timeout.js'
 import type { AgentHandle, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -168,14 +169,6 @@ export async function askAgentStreaming(
   // 无任何日志、期间所有消息排队）。超时后抛错让调用方回复"处理失败"并解冻
   // 轮询。局限：底层 LLM 推理无法中止，超时后仍在后台跑（其产出不再被聚合，
   // 事件订阅已随 finally 移除），属可接受的保底。
-  let timer: NodeJS.Timeout | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`LLM 推理超时（>${ASK_TIMEOUT_SEC}s），请稍后再试`)),
-      ASK_TIMEOUT_SEC * 1000,
-    )
-  })
-
   try {
     agent.followup(
       createUserMessage({
@@ -183,10 +176,13 @@ export async function askAgentStreaming(
         source: { kind: 'user' },
       }),
     )
-    await Promise.race([agent.whenIdle(), timeout])
+    await raceWithTimeout(
+      agent.whenIdle(),
+      ASK_TIMEOUT_SEC * 1000,
+      () => new Error(`LLM 推理超时（>${ASK_TIMEOUT_SEC}s），请稍后再试`),
+    )
     return summarize(agent.session.events, firstSeq)
   } finally {
-    clearTimeout(timer)
     off()
   }
 }

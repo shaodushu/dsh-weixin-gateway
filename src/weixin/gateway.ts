@@ -22,6 +22,7 @@ import {
   weixinLoginWithQr,
 } from './driver.js'
 import { acquireRunLock, printLockConflict, releaseRunLock } from './run-lock.js'
+import { pickDefaultAccount } from './account-select.js'
 
 export const name = 'weixin-gateway'
 
@@ -95,13 +96,12 @@ export function apply(ctx: Context, config: Config): void {
       // run 模式：解析账号并常驻
       let accountId = config.accountId
       if (!accountId) {
-        const accounts = listWeixinAccounts()
-        if (accounts.length === 0) {
-          throw new Error('没有已登录的微信账号，请先运行: --weixin-login')
-        }
         // 索引按登录顺序 append，末位 = 最新登录。扫码登录会创建新 bot 账号
         // （旧账号立即失效），默认必须用最新的，否则网关空转失效账号（-14）
-        accountId = accounts[accounts.length - 1]
+        accountId = pickDefaultAccount(listWeixinAccounts())
+        if (!accountId) {
+          throw new Error('没有已登录的微信账号，请先运行: --weixin-login')
+        }
         console.log(`使用已登录账号: ${accountId}`)
       }
 

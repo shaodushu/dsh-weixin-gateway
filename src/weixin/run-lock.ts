@@ -93,6 +93,17 @@ export function findHeldGatewayLocks(): Array<{ accountId: string; pid: string }
   return held
 }
 
+/**
+ * 找与目标账号冲突的持锁实例（login 自动避让 / run 预检用）。
+ * 未指定 accountId 时取任一持锁实例（无参 run 会占用最新账号，一律拦截）。
+ */
+export function findConflict(
+  held: ReadonlyArray<{ accountId: string; pid: string }>,
+  accountId?: string,
+): { accountId: string; pid: string } | undefined {
+  return accountId ? held.find((h) => h.accountId === accountId) : held[0]
+}
+
 /** 锁冲突提示（gateway 与 cli 共用同一文案）。 */
 export function printLockConflict(pid: string): void {
   console.error(`⚠️⚠️  检测到已有微信网关实例在运行（PID ${pid}）⚠️⚠️`)

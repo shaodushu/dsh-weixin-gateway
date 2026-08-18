@@ -1,0 +1,15 @@
+/**
+ * 超时竞速工具（LLM 推理超时保护等场景）。
+ */
+
+/**
+ * 给 promise 加超时：超时前 resolve 则返回原值；超时则 reject。
+ * 无论哪边先完成都会清理 timer（防止迟到 reject 造成 unhandled rejection）。
+ */
+export function raceWithTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(onTimeout()), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
