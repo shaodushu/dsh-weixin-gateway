@@ -5,9 +5,9 @@
 ## 前置条件（必须全部满足）
 
 1. **Node.js**（dsh 运行环境）
-2. **模型 provider**：在 `~/.dsh/settings.yaml` 配置 `llm-pi-ai`（公司网关）
+2. **模型 provider**：在 `~/.dsh/settings.yaml` 配置 `llm-pi-ai`（内部网关）
 3. **微信端启用 ClawBot 插件（最容易漏）**：微信 → 我 → 设置 → 插件 → 启用 ClawBot；不启用则消息不会路由到网关，表现为"网关在跑但收不到任何消息"
-4. **（媒体 AI 功能）公司 AI 网关凭据**：环境变量 `COMPANY_AI_BASE_URL` 与 `COMPANY_AI_KEY`（或包安装根目录的 `.env`），两者缺一即报错提示。未配置时图片视觉描述 / 语音转文字 / 文生图 / TTS 静默降级，收发消息不受影响
+4. **（媒体 AI 功能）内部 AI 网关凭据**：环境变量 `COMPANY_AI_BASE_URL` 与 `COMPANY_AI_KEY`（或包安装根目录的 `.env`），两者缺一即报错提示。未配置时图片视觉描述 / 语音转文字 / 文生图 / TTS 静默降级，收发消息不受影响
 
 ## 0. 安装 dsh-weixin 并准备环境（一次性）
 
@@ -110,6 +110,6 @@ dsh-weixin run
 ## 依赖与凭据位置
 
 - dsh 环境：`@deepseek-ai/dsh`（launcher）+ `~/.dsh/profiles/headless`（profile）
-- 模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml`，公司网关）
-- 媒体 AI 增强：`COMPANY_AI_BASE_URL` + `COMPANY_AI_KEY`（环境变量或包安装根目录 `.env`，公司网关，两者必填）
+- 模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml`，内部网关）
+- 媒体 AI 增强：`COMPANY_AI_BASE_URL` + `COMPANY_AI_KEY`（环境变量或包安装根目录 `.env`，内部网关，两者必填）
 - 微信凭据：`~/.openclaw/openclaw-weixin/accounts/*.json` + `~/.openclaw/weixin-dsh/accounts-index.json`

@@ -171,7 +171,7 @@ async function setup(): Promise<void> {
   }
 
   console.log('\n✅ 环境就绪！还剩两步（一次性）：')
-  console.log('  1. 配置模型 provider：在 ~/.dsh/settings.yaml 配置 llm-pi-ai（公司网关）')
+  console.log('  1. 配置模型 provider：在 ~/.dsh/settings.yaml 配置 llm-pi-ai（内部网关）')
   console.log('  2. 微信端启用 ClawBot 插件：微信 → 我 → 设置 → 插件')
   console.log('\n接下来：')
   console.log('  dsh-weixin login    # 扫码登录（自动避让后台守护，登录后自动交回常驻）')

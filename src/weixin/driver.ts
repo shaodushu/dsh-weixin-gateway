@@ -509,7 +509,7 @@ class WeixinStreamingSender {
   }
 }
 
-/** 语音转文字（公司 AI 网关 ASR；失败返回 null，不阻塞主流程）。 */
+/** 语音转文字（内部 AI 网关 ASR；失败返回 null，不阻塞主流程）。 */
 async function transcribeVoice(filePath: string): Promise<string | null> {
   try {
     const { transcribeAudio } = await import('./ai-service.js')
@@ -522,7 +522,7 @@ async function transcribeVoice(filePath: string): Promise<string | null> {
   }
 }
 
-/** 图片视觉描述（公司 AI 网关 qwen2.5-vl；失败返回 null，不阻塞主流程）。 */
+/** 图片视觉描述（内部 AI 网关 qwen2.5-vl；失败返回 null，不阻塞主流程）。 */
 async function describeInboundImage(filePath: string): Promise<string | null> {
   try {
     const { describeImage } = await import('./ai-service.js')

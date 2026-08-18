@@ -1,12 +1,12 @@
 /**
- * ai-service — 公司内部 AI 网关（OpenAI 兼容 API）能力封装。
+ * ai-service — 内部 AI 网关（OpenAI 兼容 API）能力封装。
  *
  * 三个能力：
  *  - transcribeAudio：语音转文字（SILK → WAV → SenseVoiceSmall ASR）
  *  - generateImage：文生图（gpt-image-2，保存本地 PNG）
  *  - describeImage：图像理解（qwen2.5-vl，base64 传入）
  *
- * 凭据：环境变量 COMPANY_AI_BASE_URL（必填，网关地址不含公司信息，由使用者
+ * 凭据：环境变量 COMPANY_AI_BASE_URL（必填，网关地址不含组织信息，由使用者
  *       显式配置）+ COMPANY_AI_KEY（必填）；支持仓库 .env 文件（gitignored）。
  *       两者缺一即视为未配置（requireConfig 抛错提示）。
  */
@@ -183,7 +183,7 @@ export async function describeImage(filePath: string, prompt = '用中文简要�
 function requireConfig(): CompanyAiConfig {
   const cfg = loadCompanyAiConfig()
   if (!cfg) {
-    throw new Error('缺少 COMPANY_AI_BASE_URL 或 COMPANY_AI_KEY：请在仓库 .env 或环境变量中显式配置公司 AI 网关')
+    throw new Error('缺少 COMPANY_AI_BASE_URL 或 COMPANY_AI_KEY：请在仓库 .env 或环境变量中显式配置内部 AI 网关')
   }
   return cfg
 }
