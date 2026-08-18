@@ -8,6 +8,7 @@
 #   ./scripts/weixin-gateway.sh status         # 状态
 #   ./scripts/weixin-gateway.sh logs [N]       # 最近日志（默认 30 行）
 #   ./scripts/weixin-gateway.sh login          # 重新扫码登录（微信账号）
+#   ./scripts/weixin-gateway.sh relogin         # 一步重登：停 daemon → 扫码 → Ctrl+C 后自动交回 daemon
 #   ./scripts/weixin-gateway.sh test [mode]    # 会话路由测试（per-user/room）
 #   ./scripts/weixin-gateway.sh demo "<任务>"  # 命令行注入闭环演示
 
@@ -56,6 +57,17 @@ case "$cmd" in
   login)
     dsh --profile headless --patch "$REPO/weixin.patch.yml" --weixin-login
     ;;
+  relogin)
+    # 一步重登：停 daemon（释放实例锁）→ 扫码登录 → 登录成功后进入保活轮询，
+    # Ctrl+C 停止登录进程后自动交回 daemon 常驻。trap INT 保证脚本在 Ctrl+C
+    # 后继续执行（实测：bash 收到 SIGINT 仍会执行后续命令）。
+    "$0" stop
+    echo "👉 请扫码登录；登录成功后进入保活轮询，Ctrl+C 停止后自动交回 daemon 常驻"
+    trap 'echo "⏹  登录进程已停止，重新拉起 daemon..."' INT
+    dsh --profile headless --patch "$REPO/weixin.patch.yml" --weixin-login
+    trap - INT
+    "$0" start
+    ;;
   test)
     mode="${2:-per-user}"
     dsh --profile headless --patch "$REPO/test.patch.yml" --session-test "$mode"
@@ -64,7 +76,7 @@ case "$cmd" in
     dsh --profile headless --patch "$REPO/gateway.patch.yml" "${2:?需要任务文本}"
     ;;
   *)
-    echo "用法: $0 {start|stop|restart|status|logs [N]|login|test [mode]|demo \"任务\"}"
+    echo "用法: $0 {start|stop|restart|status|logs [N]|login|relogin|test [mode]|demo \"任务\"}"
     exit 1
     ;;
 esac

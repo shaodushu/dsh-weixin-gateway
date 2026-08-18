@@ -145,6 +145,7 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 
 ```bash
 ./scripts/weixin-gateway.sh login            # 扫码登录（等价 dsh --weixin-login，登录后自动进保活轮询）
+./scripts/weixin-gateway.sh relogin          # 一步重登：停 daemon → 扫码 → Ctrl+C 后自动交回 daemon
 ./scripts/weixin-gateway.sh start            # 启动 launchd 服务（登录自启 + 崩溃重启）
 ./scripts/weixin-gateway.sh stop             # 停止服务
 ./scripts/weixin-gateway.sh restart          # 重启
@@ -154,6 +155,8 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 ./scripts/weixin-gateway.sh test room        # 会话路由测试（断言共享）
 ./scripts/weixin-gateway.sh demo "你好"      # 命令行注入闭环演示
 ```
+
+> **会话失效（-14）后恢复**：`./scripts/weixin-gateway.sh relogin` 一条命令搞定——先停 daemon 释放实例锁，扫码登录（成功后自动进入保活轮询），Ctrl+C 后自动重新拉起 daemon 常驻。
 
 - 架构：launchd → `scripts/weixin-gateway-daemon.sh`（while 循环守护，崩溃 5s 自动拉起）→ dsh 网关。
 - **换机器必改**：`weixin-gateway-daemon.sh` 顶部 `DSH` / `PATCH` / `ACCOUNT` / `MODE`、`docs/launchd/com.weixin-dsh.gateway.plist` 里的 daemon 脚本绝对路径，目前硬编码了作者本机值。
