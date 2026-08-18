@@ -7,7 +7,7 @@
          ↓ 文本消息
       AgentBridge（ctx.agents.create + agent.followup）
          ↓
-      dsh agent（DeepSeek-V4-Flash，内部 AI 网关）
+      dsh agent（DeepSeek-V4-Flash，AI 网关）
          ↓ 回复
       sendMessageWeixin → 微信
 ```
@@ -50,6 +50,6 @@ pnpm test                              # 单元测试（35 用例）
 ## 依赖
 
 - dsh launcher（`@deepseek-ai/dsh`）+ headless profile
-- `llm-pi-ai` provider（`~/.dsh/settings.yaml`，内部网关）
-- `COMPANY_AI_BASE_URL` + `COMPANY_AI_KEY`（环境变量或 `.env`，媒体 AI 增强）
+- `llm-pi-ai` provider（`~/.dsh/settings.yaml`，AI 网关）
+- `AI_GATEWAY_BASE_URL` + `AI_GATEWAY_KEY`（环境变量或 `.env`，媒体 AI 增强）
 - 微信凭据：`~/.openclaw/openclaw-weixin/accounts/` + `~/.openclaw/weixin-dsh/accounts-index.json`
