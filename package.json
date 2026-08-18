@@ -1,6 +1,6 @@
 {
   "name": "dsh-weixin-gateway",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "微信消息网关 dsh 插件：复用 Tencent openclaw-weixin 协议层，dsh (deepseek-harness) 作为执行层",
   "ilink_appid": "bot",
@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "demo": "dsh --profile headless --patch ./gateway.patch.yml"
   },
   "dependencies": {
@@ -30,7 +31,8 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^22.0.0",
     "@types/qrcode-terminal": "^0.12.2",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
@@ -43,14 +45,30 @@
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/cordis-plugin-loader": { "optional": true },
-    "@deepseek-ai/dsh-agent": { "optional": true },
-    "@deepseek-ai/dsh-agent-default-model": { "optional": true },
-    "@deepseek-ai/dsh-cmdline": { "optional": true },
-    "@deepseek-ai/dsh-llm": { "optional": true },
-    "@deepseek-ai/dsh-session": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/cordis-plugin-loader": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-default-model": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-cmdline": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
   },
   "files": [
     "lib",

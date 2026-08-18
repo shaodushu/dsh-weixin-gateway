@@ -21,6 +21,7 @@ import {
   runWeixinGateway,
   weixinLoginWithQr,
 } from './driver.js'
+import { acquireRunLock, printLockConflict, releaseRunLock } from './run-lock.js'
 
 export const name = 'weixin-gateway'
 
@@ -66,14 +67,26 @@ export function apply(ctx: Context, config: Config): void {
         // 也是会话保活心跳，登录进程退出会导致服务端回收 session（-14）。
         const account = await weixinLoginWithQr(config.accountId)
         console.log(`✅ 微信登录成功，账号: ${account.accountId}`)
+        // 登录后同一进程进入保活轮询，同样持锁（避免顶掉已有网关实例的会话）
+        const loginLock = acquireRunLock(account.accountId)
+        if (!loginLock.ok) {
+          printLockConflict(loginLock.pid)
+          const exit = ctx.get('appExit') as ((code: number) => void) | undefined
+          exit?.(1)
+          return
+        }
         console.log(`🚀 会话已建立，同一进程启动网关轮询（保活），Ctrl+C 停止...`)
-        const abort = new AbortController()
-        const onSignal = () => abort.abort()
-        process.once('SIGINT', onSignal)
-        process.once('SIGTERM', onSignal)
-        await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
-        process.off('SIGINT', onSignal)
-        process.off('SIGTERM', onSignal)
+        try {
+          const abort = new AbortController()
+          const onSignal = () => abort.abort()
+          process.once('SIGINT', onSignal)
+          process.once('SIGTERM', onSignal)
+          await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
+          process.off('SIGINT', onSignal)
+          process.off('SIGTERM', onSignal)
+        } finally {
+          releaseRunLock(account.accountId)
+        }
         const exit = ctx.get('appExit') as ((code: number) => void) | undefined
         exit?.(0)
         return
@@ -90,16 +103,29 @@ export function apply(ctx: Context, config: Config): void {
         console.log(`使用已登录账号: ${accountId}`)
       }
 
-      const account = resolveAccount(accountId)
-      const abort = new AbortController()
-      const onSignal = () => abort.abort()
-      process.once('SIGINT', onSignal)
-      process.once('SIGTERM', onSignal)
+      // 实例互斥：同一账号同时只能有一个网关实例（防互顶会话 -14）
+      const lock = acquireRunLock(accountId)
+      if (!lock.ok) {
+        printLockConflict(lock.pid)
+        const exit = ctx.get('appExit') as ((code: number) => void) | undefined
+        exit?.(1)
+        return
+      }
 
-      console.log(`🚀 微信网关启动（账号 ${account.accountId}），Ctrl+C 停止...`)
-      await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
-      process.off('SIGINT', onSignal)
-      process.off('SIGTERM', onSignal)
+      const account = resolveAccount(accountId)
+      try {
+        const abort = new AbortController()
+        const onSignal = () => abort.abort()
+        process.once('SIGINT', onSignal)
+        process.once('SIGTERM', onSignal)
+
+        console.log(`🚀 微信网关启动（账号 ${account.accountId}），Ctrl+C 停止...`)
+        await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
+        process.off('SIGINT', onSignal)
+        process.off('SIGTERM', onSignal)
+      } finally {
+        releaseRunLock(accountId)
+      }
       const exit = ctx.get('appExit') as ((code: number) => void) | undefined
       exit?.(0)
     } catch (error) {

@@ -22,11 +22,12 @@
  */
 import { Command } from 'commander'
 import { spawn, spawnSync } from 'node:child_process'
+import { findHeldGatewayLocks, printLockConflict } from './weixin/run-lock.js'
 
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.2.2'
+const VERSION = '0.2.3'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -44,6 +45,20 @@ function runDsh(args: string[]): Promise<number> {
 function detectDsh(): boolean {
   const res = spawnSync('dsh', ['--version'], { stdio: 'ignore' })
   return res.status === 0
+}
+
+/**
+ * 转发前预检实例互斥（只读，不写锁；真实锁由 gateway 兜底获取）。
+ * 已有同账号网关实例在运行时提示并退出，避免重复启动互相顶掉会话。
+ */
+function precheckInstance(accountId?: string): boolean {
+  const held = findHeldGatewayLocks()
+  const conflict = accountId ? held.find((h) => h.accountId === accountId) : held[0]
+  if (conflict) {
+    printLockConflict(conflict.pid)
+    return false
+  }
+  return true
 }
 
 /** setup：检测/装 dsh → 建 profile+装插件 → 验证。幂等，可在已装环境重跑。 */
@@ -114,6 +129,7 @@ program
   .description('扫码登录微信账号（成功后同一进程自动进入保活轮询，Ctrl+C 停止）')
   .argument('[accountId]', '账号 id（可选）')
   .action(async (accountId?: string) => {
+    if (!precheckInstance(accountId)) process.exit(1)
     const args = ['--profile', PROFILE, '--weixin-login']
     if (accountId) args.push(accountId)
     const code = await runDsh(args)
@@ -126,6 +142,7 @@ program
   .argument('[accountId]', '账号 id（可选，默认第一个已登录账号）')
   .option('--session-mode <mode>', '会话模式：per-user（每用户独立）/ room（统一房间，默认）', 'room')
   .action(async (accountId: string | undefined, opts: { sessionMode: string }) => {
+    if (!precheckInstance(accountId)) process.exit(1)
     // accountId 必须紧跟 --weixin-run（它是该 option 的可选值），不能放在 --session-mode 后面
     const args = ['--profile', PROFILE, '--weixin-run']
     if (accountId) args.push(accountId)

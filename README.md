@@ -32,6 +32,7 @@
 1. **Node.js**（dsh 运行环境）
 2. **模型 provider**：在 `~/.dsh/settings.yaml` 配置 `llm-pi-ai`（公司网关）
 3. **微信端启用 ClawBot 插件（最容易漏）**：微信 → 我 → 设置 → 插件 → 启用 ClawBot；不启用则消息不会路由到网关，表现为"网关在跑但收不到任何消息"
+4. **（媒体 AI 功能）公司 AI 网关凭据**：环境变量 `COMPANY_AI_BASE_URL` 与 `COMPANY_AI_KEY`（或包安装根目录的 `.env`），两者缺一即报错提示。未配置时图片视觉描述 / 语音转文字 / 文生图 / TTS 静默降级，收发消息不受影响
 
 ### 0. 安装 dsh-weixin 并准备环境（一次性）
 
@@ -85,8 +86,6 @@ dsh-weixin run
 
 启动后网关会 `getUpdates` 长轮询收消息，消息交给 dsh agent 回复并实时发回微信。
 
-> 旧式 `--patch` 用法仍可用（`--patch node_modules/dsh-weixin-gateway/cordis.patch.yml ...`，路径相对当前目录解析），仅在你需要临时叠加其他 patch 时使用。
-
 ### 换账号 / 重新扫码
 
 网关检测到 token 失效（getUpdates 返回 -14）连续 3 次会打印醒目报警和重新扫码指引。手动换账号：
@@ -97,21 +96,30 @@ dsh-weixin run
 
 > 每次扫码登录会创建新 bot（`xxx@im.bot`），旧账号立即失效；如需清理，删除 `~/.openclaw/openclaw-weixin/accounts/` 下旧账号文件即可。
 
-### 自测（不依赖微信，开发者调试用）
-
-`session-test` 测试插件未打进 profile 层，需临时 `--patch` test.patch.yml：
-
-```bash
-dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --session-test per-user
-dsh --profile headless --patch node_modules/dsh-weixin-gateway/test.patch.yml --session-test room
-```
-
 ### 关于服务常驻
 
 npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.yml`，**不含** `scripts/` 管理脚本和 launchd 配置。需要开机自启、崩溃自动重启时：
 
 - 从本仓库拷贝 `scripts/weixin-gateway.sh`、`scripts/weixin-gateway-daemon.sh`、`docs/launchd/com.weixin-dsh.gateway.plist`；
 - 把 daemon 脚本顶部的 `DSH` / `PATCH` / `ACCOUNT` / `MODE` 变量改成你的本机值（见[开发者路径](#二-开发者仓库内开发)）。
+
+### 实例互斥（同一账号只能一个网关）
+
+同一账号同一时刻**只能有一个网关实例**——`getupdates` 长轮询既是收消息也是会话保活心跳，两个实例同时轮询会互相顶掉对方会话（`-14 session timeout`，重新扫码也无效）。网关启动（`run` / `login` 保活）时会对账号取互斥锁（`~/.openclaw/weixin-dsh/run-<accountId>.lock`）：
+
+- **冲突**：已有实例在跑时，新实例立即报错退出，提示停掉旧实例（前台实例 Ctrl+C；launchd 守护 `./scripts/weixin-gateway.sh stop`）；
+- **后台守护**：launchd daemon 检测到前台实例持锁时退避 60s 重试，待其退出后自动接管；
+- **残留恢复**：实例崩溃（kill -9 / OOM）留下的锁会在下次启动时自动识别并覆盖，无需手工清理。
+
+典型用法二选一，不要同时开：
+
+```bash
+# 方式一：后台常驻（推荐，开机自启 + 崩溃重启）
+./scripts/weixin-gateway.sh start
+
+# 方式二：前台占一个终端
+dsh-weixin run
+```
 
 ---
 
@@ -122,6 +130,14 @@ npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.ym
 ```bash
 pnpm install && pnpm build
 ```
+
+### 单元测试
+
+```bash
+pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络）
+```
+
+发布前跑 `./scripts/test-publish.sh`（单测 → 构建 → 打包 → 隔离安装 → bin → 会话路由 → setup 链路）。
 
 ### 管理脚本（`scripts/weixin-gateway.sh`）
 
@@ -168,11 +184,9 @@ pnpm install && pnpm build
 ## 关键经验（踩坑记录）
 
 1. **-14 session timeout 的真相**：网关进程的 `getUpdates` 长轮询既是拉消息也是**保活心跳**；登录进程退出后 session 被服务端回收。修复：登录成功后**同一进程立即接轮询**。独立测试请求（curl/node 单发）可能被服务端以并发限制拒绝（-14），**不代表网关状态**——判断网关是否工作要看网关日志，不要用独立请求测试。
-2. **重复扫码顶掉旧会话**：每次扫码登录创建新 bot（`xxx@im.bot`），旧会话立即失效。重新登录前删除旧账号文件。
-3. **`notifyStart` 是启动顺序的一部分**：原版 channel 启动时先 `notifyStart` 再轮询。
-4. **`ilink_appid: "bot"` 必须**在 package.json（`readPackageJsonFromDir` 向上查找）。
-5. **微信端 ClawBot 插件必须启用**（`我 → 设置 → 插件`），否则消息不路由。
-6. **流式发送勿双重发送**：`WeixinStreamingSender.flush()` 曾同时 queueSend 尾文、又把尾文放进返回的 `textParts`，调用方再发一次 → 每条回复重复（实测"问时间回两条"）。修复：尾文只由调用方统一发一次（flush 只返回不发送）。
+2. **`notifyStart` 是启动顺序的一部分**：原版 channel 启动时先 `notifyStart` 再轮询。
+3. **`ilink_appid: "bot"` 必须**在 package.json（`readPackageJsonFromDir` 向上查找）。
+4. **流式发送勿双重发送**：`WeixinStreamingSender.flush()` 曾同时 queueSend 尾文、又把尾文放进返回的 `textParts`，调用方再发一次 → 每条回复重复（实测"问时间回两条"）。修复：尾文只由调用方统一发一次（flush 只返回不发送）。
 
 ## 开发状态
 
@@ -186,4 +200,5 @@ pnpm install && pnpm build
 
 - dsh 环境：`@deepseek-ai/dsh`（launcher）+ `~/.dsh/profiles/headless`（profile）
 - 模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml`，公司网关）
+- 媒体 AI 增强：`COMPANY_AI_BASE_URL` + `COMPANY_AI_KEY`（环境变量或包安装根目录 `.env`，公司网关，两者必填）
 - 微信凭据：`~/.openclaw/openclaw-weixin/accounts/*.json` + `~/.openclaw/weixin-dsh/accounts-index.json`
