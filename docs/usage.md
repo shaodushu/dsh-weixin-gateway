@@ -7,7 +7,7 @@
 1. **Node.js**（dsh 运行环境）
 2. **模型 provider**：在 `~/.dsh/settings.yaml` 配置 `llm-pi-ai`（AI 网关）
 3. **微信端启用 ClawBot 插件（最容易漏）**：微信 → 我 → 设置 → 插件 → 启用 ClawBot；不启用则消息不会路由到网关，表现为"网关在跑但收不到任何消息"
-4. **（媒体 AI 功能）AI 网关凭据**：环境变量 `AI_GATEWAY_BASE_URL` 与 `AI_GATEWAY_KEY`（或包安装根目录的 `.env`），两者缺一即报错提示。未配置时图片视觉描述 / 语音转文字 / 文生图 / TTS 静默降级，收发消息不受影响
+4. **（媒体 AI 功能）AI 能力凭据**：语音转文字 / 图像理解 / 文生图 / 语音合成**每个能力可独立配置**（各自的端点+密钥+模型，见文末[凭据表](#依赖与凭据位置)），也可只配全局一组 `AI_GATEWAY_BASE_URL` + `AI_GATEWAY_KEY` 让 4 个能力共用。未配置的能力静默降级，收发消息不受影响。**`dsh-weixin setup` 会交互式引导逐项配置并写入 `.env`，无需手动编辑**。
 
 ## 0. 安装 dsh-weixin 并准备环境（一次性）
 
@@ -19,7 +19,7 @@ npm install -g dsh-weixin-gateway
 dsh-weixin setup
 ```
 
-`setup` 幂等，环境已就绪时重跑只是复查。它会提示最后两步手动项：配置模型 provider、微信端启用 ClawBot 插件。
+`setup` 幂等，环境已就绪时重跑只是复查。它包含**AI 能力交互式配置引导**（终端下逐能力问答）：已配置的能力显示当前值，回车保持 / `r` 重配 / `x` 清除；未配置的能力问网关地址（回车跳过）、密钥（必填）、模型（回车用默认）。问答结果写入包根目录 `.env`（保留原有内容）。非交互终端（管道/CI）跳过问答，改为打印环境变量指引。它还会提示最后两步手动项：配置对话模型 provider、微信端启用 ClawBot 插件。
 
 > 不装 bin 时的等价手动方式（可选）：
 > ```bash
@@ -110,6 +110,16 @@ dsh-weixin run
 ## 依赖与凭据位置
 
 - dsh 环境：`@deepseek-ai/dsh`（launcher）+ `~/.dsh/profiles/headless`（profile）
-- 模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml`，AI 网关）
-- 媒体 AI 增强：`AI_GATEWAY_BASE_URL` + `AI_GATEWAY_KEY`（环境变量或包安装根目录 `.env`，AI 网关，两者必填）
+- 对话模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml`，AI 网关）
+- AI 能力凭据（包根目录 `.env` 或环境变量；**每个能力独立配置**，模型缺省用默认值；也可只配全局一组让全部能力共用）：
+
+| 能力 | 端点变量 | 密钥变量 | 模型变量 | 默认模型 |
+|---|---|---|---|---|
+| 语音转文字 | `AI_ASR_BASE_URL` | `AI_ASR_KEY` | `AI_ASR_MODEL` | SenseVoiceSmall |
+| 图像理解 | `AI_VISION_BASE_URL` | `AI_VISION_KEY` | `AI_VISION_MODEL` | qwen2.5-vl |
+| 文生图 | `AI_IMAGE_BASE_URL` | `AI_IMAGE_KEY` | `AI_IMAGE_MODEL` | gpt-image-2 |
+| 语音合成 | `AI_TTS_BASE_URL` | `AI_TTS_KEY` | `AI_TTS_MODEL` | IndexTTS-1.5 |
+
+- 全局兜底凭据（能力级未单独配置时共用，模型用各自默认）：`AI_GATEWAY_BASE_URL` + `AI_GATEWAY_KEY`
+- 优先级：能力级（端点+密钥齐全）→ 全局 → 未配置（静默降级）；`.env` 里可省略 `MODEL` 行
 - 微信凭据：`~/.openclaw/openclaw-weixin/accounts/*.json` + `~/.openclaw/weixin-dsh/accounts-index.json`

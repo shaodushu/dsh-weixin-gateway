@@ -50,6 +50,6 @@ pnpm test                              # 单元测试（35 用例）
 ## 依赖
 
 - dsh launcher（`@deepseek-ai/dsh`）+ headless profile
-- `llm-pi-ai` provider（`~/.dsh/settings.yaml`，AI 网关）
-- `AI_GATEWAY_BASE_URL` + `AI_GATEWAY_KEY`（环境变量或 `.env`，媒体 AI 增强）
+- `llm-pi-ai` provider（`~/.dsh/settings.yaml`，对话模型）
+- AI 能力凭据：语音转文字/图像理解/文生图/语音合成可**各自独立配置**（`AI_ASR_`/`AI_VISION_`/`AI_IMAGE_`/`AI_TTS_` 三件套），或只配全局 `AI_GATEWAY_BASE_URL`+`AI_GATEWAY_KEY` 共用；`dsh-weixin setup` 可交互引导写入 `.env`
 - 微信凭据：`~/.openclaw/openclaw-weixin/accounts/` + `~/.openclaw/weixin-dsh/accounts-index.json`
