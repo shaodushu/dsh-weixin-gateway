@@ -138,7 +138,51 @@ export interface StreamCallbacks {
 const ASK_TIMEOUT_SEC = 180
 
 /**
- * 流式版本：注入消息后实时订阅 session/event 的 assistant/chunk（text-delta），
+ * 从 assistant/chunk 事件中提取应喂给发送器的流式文本（纯函数，可单测）。
+ *
+ * 背景（实测）：普通文本块逐 token 增量以 text-delta 广播；但**工具调用后
+ * 的最终文本块**不产生 text-delta（只有 text-chunks + 聚合的 block-end）——
+ * 只订阅 text-delta 会漏掉整个块，发送器收不到任何内容，[image:] 等标记
+ * 不会被提取发送（实测"画一个杯子"：图片生成成功但用户收不到）。
+ *
+ * 规则：
+ * - block-start → 重置块状态（块内尚未收到增量）
+ * - text-delta 非空 → 标记块已有增量，返回该增量
+ * - block-end 携带完整文本 且 该块无增量 → 返回完整文本兜底（幂等：
+ *   有增量的块跳过，避免与增量重复发送）
+ * - reasoning/工具调用块 block-end 无文本 → 返回 undefined
+ */
+export interface StreamChunkState {
+  blockHadDelta: boolean
+}
+
+export function applyStreamChunk(
+  event: SessionEvent,
+  state: StreamChunkState,
+): string | undefined {
+  if (event.type !== 'assistant/chunk') return undefined
+  const chunk = event.data.chunk
+  if (chunk.type === 'block-start') {
+    state.blockHadDelta = false
+    return undefined
+  }
+  if (chunk.type === 'text-delta') {
+    if (chunk.text) {
+      state.blockHadDelta = true
+      return chunk.text
+    }
+    return undefined
+  }
+  if (chunk.type === 'block-end' && !state.blockHadDelta) {
+    const block = chunk.block
+    if (block.type === 'text' && block.text) return block.text
+    return undefined
+  }
+  return undefined
+}
+
+/**
+ * 流式版本：注入消息后实时订阅 session/event 的 assistant/chunk，
  * 逐块回调调用方（用于微信增量发送）。返回与 askAgent 相同的聚合结果。
  */
 export async function askAgentStreaming(
@@ -148,15 +192,14 @@ export async function askAgentStreaming(
 ): Promise<AskResult> {
   const agent = handle.agent
   const firstSeq = agent.session.seq
+  const streamState: StreamChunkState = { blockHadDelta: false }
 
   // 订阅会话事件流（agent 作用域 ctx；只在本 ask 的生命周期内有效）
   const off = agent.ctx.on('session/event', (_session, event) => {
     if (event.seq < firstSeq) return
     if (event.type === 'assistant/chunk') {
-      const chunk = event.data.chunk
-      if (chunk.type === 'text-delta' && chunk.text) {
-        cbs.onDelta?.(chunk.text)
-      }
+      const delta = applyStreamChunk(event, streamState)
+      if (delta) cbs.onDelta?.(delta)
       return
     }
     if (event.type === 'turn/start') {
