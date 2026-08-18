@@ -53,6 +53,7 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 | `src/weixin/driver.ts` | 微信驱动：扫码登录 → `notifyStart` → `getUpdates` 长轮询 → 消息→agent→回复 |
 | `src/weixin/entry.ts` / `gateway.ts` | 命令行解析（`--weixin-login` / `--weixin-run`）与网关应用插件 |
 | `src/weixin/run-lock.ts` | 实例互斥锁（账号级 pidfile，见[使用手册](usage.md#实例互斥同一账号只能一个网关)） |
+| `src/weixin/ai-config.ts` | AI 能力配置中枢：能力级独立配置（端点+密钥+模型）解析、.env upsert、setup 引导问题构建 |
 | `src/cli.ts` | `dsh-weixin` 引导 CLI（bin 入口）：setup / login / run / update |
 
 > 微信机器人**回复约定**（媒体标记、回复风格）见 [AGENTS.md](../AGENTS.md)——它是网关作为机器人时的行为规范，不是模块说明。
