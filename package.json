@@ -75,7 +75,8 @@
     "cordis.patch.yml",
     "test.patch.yml",
     "README.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "docs"
   ],
   "dsh": {
     "bundle": {
