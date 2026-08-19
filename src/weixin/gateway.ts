@@ -83,7 +83,7 @@ export function apply(ctx: Context, config: Config): void {
           exit?.(1)
           return
         }
-        console.log(`🚀 会话已建立，同一进程启动网关轮询（保活），Ctrl+C 停止...`)
+        console.log(`🚀 会话已建立，同一进程启动网关轮询（保活）`)
         try {
           const abort = new AbortController()
           const onSignal = () => abort.abort()
@@ -128,7 +128,7 @@ export function apply(ctx: Context, config: Config): void {
         process.once('SIGINT', onSignal)
         process.once('SIGTERM', onSignal)
 
-        console.log(`🚀 微信网关启动（账号 ${account.accountId}），Ctrl+C 停止...`)
+        console.log(`🚀 微信网关启动（账号 ${account.accountId}），后台常驻运行中`)
         await runWeixinGateway(ctx, account, { abortSignal: abort.signal, sessionMode: config.sessionMode ?? 'room' })
         process.off('SIGINT', onSignal)
         process.off('SIGTERM', onSignal)
