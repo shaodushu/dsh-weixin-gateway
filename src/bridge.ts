@@ -132,6 +132,8 @@ export interface StreamCallbacks {
   onDelta?: (text: string) => void
   /** 每个 turn 开始时。 */
   onTurnStart?: () => void
+  /** 模型请求调用工具时（tool/call 事件；参数为模型产出的原始 JSON 字符串）。 */
+  onToolCall?: (name: string, args: string) => void
 }
 
 /** 一次 ask 的 LLM 推理超时（秒）。 */
@@ -200,6 +202,10 @@ export async function askAgentStreaming(
     if (event.type === 'assistant/chunk') {
       const delta = applyStreamChunk(event, streamState)
       if (delta) cbs.onDelta?.(delta)
+      return
+    }
+    if (event.type === 'tool/call') {
+      cbs.onToolCall?.(event.data.name, event.data.arguments)
       return
     }
     if (event.type === 'turn/start') {

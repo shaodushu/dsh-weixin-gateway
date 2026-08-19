@@ -327,6 +327,19 @@ async function handleIncoming(
         logger.info(`weixin-gateway: stream delta ${delta.length} chars: ${delta.slice(0, 80).replace(/\n/g, '\\n')}`)
         void sender.feed(delta)
       },
+      onToolCall: (name, args) => {
+        // 工具调用起始时间戳（排障用：拆分"LLM 推理"与"工具执行"耗时）
+        logger.info(`weixin-gateway: tool call ${name} args=${args.slice(0, 120)}`)
+        if (name === 'generate_image') {
+          // 文生图实测 ~60s（波动可达 2 分钟+），且生成期间无文本增量：
+          // 立即发占位回复，避免用户无反馈干等
+          void sendMessageWeixin({
+            to,
+            text: '好的，正在生成图片，大概需要 1 分钟左右，请稍候～',
+            opts: { baseUrl, token, contextToken },
+          }).catch(() => undefined)
+        }
+      },
     })
     if (result.error !== undefined) {
       await sendMessageWeixin({

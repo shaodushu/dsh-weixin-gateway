@@ -43,7 +43,7 @@ import type { AiCapabilityQuestions } from './weixin/ai-config.js'
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.3.4'
+const VERSION = '0.3.5'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {

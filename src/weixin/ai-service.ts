@@ -26,6 +26,26 @@ const SILK_SAMPLE_RATE = 24_000
 /** 生成图片保存目录。 */
 const GENERATED_DIR = path.join(resolveStateDir(), 'weixin-dsh', 'media', 'generated')
 
+/** 各能力 fetch 超时（毫秒）：图像生成本身实测 ~60s（波动 45-143s），给足 150s；其余能力 60s。 */
+const FETCH_TIMEOUT_MS = {
+  asr: 60_000,
+  vision: 60_000,
+  image: 150_000,
+  tts: 60_000,
+} as const
+
+/** 带超时的 fetch：AbortSignal.timeout 的 TimeoutError 转译为可读错误（避免调用方看到裸 DOMException）。 */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, label: string): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(`${label}请求超时（>${Math.round(timeoutMs / 1000)}s）`)
+    }
+    throw err
+  }
+}
+
 /** 微信 SILK 缓冲区 → WAV Buffer（16bit 单声道）。 */
 export async function silkToWav(silkBuf: Buffer): Promise<Buffer> {
   const result = await decode(silkBuf, SILK_SAMPLE_RATE)
@@ -59,11 +79,11 @@ export async function transcribeAudio(filePath: string): Promise<string> {
   const form = new FormData()
   form.append('file', new Blob([audio], { type: 'audio/wav' }), path.basename(filePath) || 'voice.wav')
   form.append('model', cfg.model)
-  const resp = await fetch(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
+  const resp = await fetchWithTimeout(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${cfg.apiKey}` },
     body: form,
-  })
+  }, FETCH_TIMEOUT_MS.asr, '语音转文字')
   const data = (await resp.json()) as { text?: string; error?: { message?: string } }
   if (!resp.ok || !data.text) {
     throw new Error(`ASR 失败: ${data.error?.message ?? resp.status}`)
@@ -75,14 +95,14 @@ export async function transcribeAudio(filePath: string): Promise<string> {
 export async function generateImage(prompt: string, opts: { size?: string } = {}): Promise<string> {
   const cfg = requireCapabilityConfig('image')
   const size = opts.size ?? '1024x1024'
-  const resp = await fetch(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
+  const resp = await fetchWithTimeout(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${cfg.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ model: cfg.model, prompt, n: 1, size }),
-  })
+  }, FETCH_TIMEOUT_MS.image, '图像生成')
   const data = (await resp.json()) as { data?: Array<{ b64_json?: string; url?: string }>; error?: { message?: string } }
   if (!resp.ok || !data.data?.[0]) {
     throw new Error(`图像生成失败: ${data.error?.message ?? resp.status}`)
@@ -96,7 +116,7 @@ export async function generateImage(prompt: string, opts: { size?: string } = {}
     // 从魔数推断扩展名
     if (buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8) ext = 'jpg'
   } else if (url) {
-    const imgResp = await fetch(url)
+    const imgResp = await fetchWithTimeout(url, {}, FETCH_TIMEOUT_MS.vision, '图像下载')
     if (!imgResp.ok) throw new Error(`图像下载失败: ${imgResp.status}`)
     buffer = Buffer.from(await imgResp.arrayBuffer())
   } else {
@@ -114,7 +134,7 @@ export async function describeImage(filePath: string, prompt = '用中文简要�
   const cfg = requireCapabilityConfig('vision')
   const mime = filePath.endsWith('.png') ? 'image/png' : 'image/jpeg'
   const b64 = fs.readFileSync(filePath).toString('base64')
-  const resp = await fetch(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
+  const resp = await fetchWithTimeout(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${cfg.apiKey}`,
@@ -133,7 +153,7 @@ export async function describeImage(filePath: string, prompt = '用中文简要�
       ],
       max_tokens: 300,
     }),
-  })
+  }, FETCH_TIMEOUT_MS.vision, '图像理解')
   const data = (await resp.json()) as {
     choices?: Array<{ message?: { content?: string } }>
     error?: { message?: string }
@@ -148,7 +168,7 @@ export async function describeImage(filePath: string, prompt = '用中文简要�
 /** 文字合成语音 → WAV Buffer（24000Hz 16bit 单声道）。 */
 export async function synthesizeSpeech(text: string, opts: { voice?: string } = {}): Promise<Buffer> {
   const cfg = requireCapabilityConfig('tts')
-  const resp = await fetch(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
+  const resp = await fetchWithTimeout(`${cfg.baseUrl}${cfg.def.endpointPath}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${cfg.apiKey}`,
@@ -159,7 +179,7 @@ export async function synthesizeSpeech(text: string, opts: { voice?: string } = 
       input: text,
       voice: opts.voice ?? 'default',
     }),
-  })
+  }, FETCH_TIMEOUT_MS.tts, '语音合成')
   if (!resp.ok) {
     let msg = String(resp.status)
     try {

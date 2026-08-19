@@ -9,8 +9,9 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { applyStreamChunk } from './bridge.js'
+import { applyStreamChunk, askAgentStreaming } from './bridge.js'
 import type { StreamChunkState } from './bridge.js'
+import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 function chunk(seq: number, type: string, text?: string): SessionEvent {
@@ -95,5 +96,50 @@ describe('applyStreamChunk', () => {
   it('非 assistant/chunk 事件不处理', () => {
     const s = state()
     expect(applyStreamChunk({ seq: 1, type: 'turn/start', data: {} } as unknown as SessionEvent, s)).toBeUndefined()
+  })
+})
+
+describe('askAgentStreaming tool/call 转发', () => {
+  /** 轻量 mock agent 句柄：可手动 emit 会话事件，whenIdle 立即 resolve。 */
+  function mockHandle(): { handle: AgentHandle; emit: (e: SessionEvent) => void } {
+    const listeners: Array<(session: unknown, event: SessionEvent) => void> = []
+    const agent = {
+      session: { seq: 0, events: [] },
+      ctx: {
+        on: (_type: string, fn: (session: unknown, event: SessionEvent) => void) => {
+          listeners.push(fn)
+          return () => undefined
+        },
+      },
+      followup: () => undefined,
+      whenIdle: async () => undefined,
+    } as unknown as AgentHandle
+    return {
+      handle: { agent } as unknown as AgentHandle,
+      emit: (e) => listeners.forEach((fn) => fn(null, e)),
+    }
+  }
+
+  it('tool/call 事件转发名称与参数原文（占位回复/耗时拆分的触发点）', async () => {
+    const { handle, emit } = mockHandle()
+    const calls: Array<[string, string]> = []
+    const p = askAgentStreaming(handle, '画一个杯子', { onToolCall: (n, a) => calls.push([n, a]) })
+    emit({
+      seq: 1,
+      type: 'tool/call',
+      data: { turn: 1, step: 1, callId: 'call-1', name: 'generate_image', arguments: '{"prompt":"蓝色保温杯"}' },
+    } as unknown as SessionEvent)
+    await p
+    expect(calls).toEqual([['generate_image', '{"prompt":"蓝色保温杯"}']])
+  })
+
+  it('非 tool/call 事件不触发 onToolCall', async () => {
+    const { handle, emit } = mockHandle()
+    const calls: string[] = []
+    const p = askAgentStreaming(handle, '你好', { onToolCall: (n) => calls.push(n) })
+    emit({ seq: 1, type: 'turn/start', data: { turn: 1 } } as unknown as SessionEvent)
+    emit({ seq: 2, type: 'assistant/chunk', data: { chunk: { type: 'block-start', index: 0 } } } as unknown as SessionEvent)
+    await p
+    expect(calls).toEqual([])
   })
 })
