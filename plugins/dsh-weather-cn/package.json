@@ -1,0 +1,48 @@
+{
+  "name": "dsh-weather-cn",
+  "version": "0.1.1",
+  "description": "Weather tool for DeepSeek Harness via Open-Meteo (free, no API key). CN fork: 中文地名直接用（geocoding 带 language=zh）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "weather",
+    "open-meteo"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sunshine-lang/dsh-weather.git"
+  },
+  "homepage": "https://github.com/sunshine-lang/dsh-weather",
+  "bugs": {
+    "url": "https://github.com/sunshine-lang/dsh-weather/issues"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
