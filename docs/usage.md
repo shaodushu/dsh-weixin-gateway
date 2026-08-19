@@ -19,7 +19,12 @@ npm install -g dsh-weixin-gateway
 dsh-weixin setup
 ```
 
-`setup` 幂等，环境已就绪时重跑只是复查。它包含**AI 能力交互式配置引导**（终端下逐能力问答）：已配置的能力显示当前值，回车保持 / `r` 重配 / `x` 清除；未配置的能力问网关地址（回车跳过）、密钥（必填）、模型（回车用默认）。问答结果写入固定位置 `~/.openclaw/weixin-dsh/.env`（所有运行模式共用，保留原有内容）。非交互终端（管道/CI）跳过问答，改为打印环境变量指引。它还会提示最后两步手动项：配置对话模型 provider、微信端启用 ClawBot 插件。
+`setup` 幂等，环境已就绪时重跑只是复查。它包含两段**交互式配置引导**（终端下问答）：
+
+- **AI 能力**（语音转文字 / 图像理解 / 文生图 / 语音合成）：逐能力问答。已配置的显示当前值，回车保持 / `r` 重配 / `x` 清除；未配置的问网关地址（回车跳过）、密钥（必填）、模型（回车用默认）。结果写入固定位置 `~/.openclaw/weixin-dsh/.env`（所有运行模式共用，保留原有内容）。
+- **对话模型 provider**：问答 provider 名 / API 风格 / 网关地址（必填）/ 模型 id / API 密钥（默认复用 `AI_GATEWAY_KEY`）。结果写入 `~/.dsh/settings.yaml`（`llm-pi-ai` + `agent-default-model`）与 `~/.dsh/.credentials.yaml`（`COMPANY_API_KEY`）。已配置时回车保持 / `r` 重配 / `x` 清除。
+
+非交互终端（管道/CI）跳过问答，改为打印手动配置指引。结束时按实际状态提示剩余手动项（对话模型未配置时才会提示配置步骤；微信端启用 ClawBot 插件始终提示）。
 
 > 不装 bin 时的等价手动方式（可选）：
 > ```bash
@@ -82,16 +87,24 @@ dsh-weixin run
 
 ## 关于服务常驻
 
-npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.yml`，**不含** `scripts/` 管理脚本和 launchd 配置。需要开机自启、崩溃自动重启时：
+npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.yml`，**不含** `scripts/` 管理脚本和 launchd 配置。launchd 常驻服务的启停直接由 CLI 管理，无需拷贝任何文件：
 
-- 从本仓库拷贝 `scripts/weixin-gateway.sh`、`scripts/weixin-gateway-daemon.sh`、`docs/launchd/com.weixin-dsh.gateway.plist`；
+```bash
+dsh-weixin start       # 启动后台守护（launchd 常驻，崩溃自动重启）
+dsh-weixin stop        # 停止后台守护
+dsh-weixin restart     # 重启后台守护
+dsh-weixin status      # 查看守护与网关实例状态（谁在跑、哪个账号）
+```
+
+需要自定义 daemon 行为（换账号模式 / 改 DSH 路径）时，才从本仓库拷贝 `scripts/weixin-gateway.sh`、`scripts/weixin-gateway-daemon.sh`、`docs/launchd/com.weixin-dsh.gateway.plist` 自行部署（本仓库脚本也提供 start/stop/restart/status）：
+
 - 把 daemon 脚本顶部的 `DSH` / `PATCH` / `MODE` 变量改成你的本机值（见[开发文档](development.md)）。账号不固定：扫码登录会创建新账号（`xxx@im.bot`），daemon 自动取最新已登录账号。
 
 ## 实例互斥（同一账号只能一个网关）
 
 同一账号同一时刻**只能有一个网关实例**——`getupdates` 长轮询既是收消息也是会话保活心跳，两个实例同时轮询会互相顶掉对方会话（`-14 session timeout`，重新扫码也无效）。网关启动（`run` / `login` 保活）时会对账号取互斥锁（`~/.openclaw/weixin-dsh/run-<accountId>.lock`）：
 
-- **冲突**：`run` 遇已有实例时立即报错退出，提示停掉旧实例（前台实例 Ctrl+C；launchd 守护 `./scripts/weixin-gateway.sh stop`）；
+- **冲突**：`run` 遇已有实例时立即报错退出，提示停掉旧实例（前台实例 Ctrl+C；后台守护 `dsh-weixin stop`，仓库开发模式也可用 `./scripts/weixin-gateway.sh stop`）；
 - **`login` 例外**：登录 = 主动换会话，`dsh-weixin login` 会自动停掉 launchd 守护释放锁（停不掉的才是前台实例，需要手动 Ctrl+C），登录结束后自动交回 daemon 常驻；
 - **后台守护**：launchd daemon 检测到前台实例持锁时退避 60s 重试，待其退出后自动接管；
 - **残留恢复**：实例崩溃（kill -9 / OOM）留下的锁会在下次启动时自动识别并覆盖，无需手工清理。
@@ -100,7 +113,7 @@ npm 包只包含 `lib/`（编译产物）和 `cordis.patch.yml` / `test.patch.ym
 
 ```bash
 # 方式一：后台常驻（推荐，开机自启 + 崩溃重启）
-./scripts/weixin-gateway.sh start
+dsh-weixin start
 
 # 方式二：前台占一个终端
 dsh-weixin run
@@ -118,7 +131,7 @@ dsh-weixin run
 ## 依赖与凭据位置
 
 - dsh 环境：`@deepseek-ai/dsh`（launcher）+ `~/.dsh/profiles/headless`（profile）
-- 对话模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml`，AI 网关）
+- 对话模型：`llm-pi-ai` provider（`~/.dsh/settings.yaml` + `~/.dsh/.credentials.yaml`，AI 网关，anthropic-messages API、baseURL 不带 `/v1`）。`dsh-weixin setup` 引导配置，密钥存在 `.credentials.yaml`（键 `COMPANY_API_KEY`，0600）
 - AI 能力凭据（固定位置 `~/.openclaw/weixin-dsh/.env`，所有运行模式共用；或环境变量；**每个能力独立配置**，模型缺省用默认值；也可只配全局一组让全部能力共用）：
 
 | 能力 | 端点变量 | 密钥变量 | 模型变量 | 默认模型 |

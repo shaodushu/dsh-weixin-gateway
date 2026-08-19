@@ -39,11 +39,22 @@ import {
   writeEnvFile,
 } from './weixin/ai-config.js'
 import type { AiCapabilityQuestions } from './weixin/ai-config.js'
+import {
+  applyDialogModelAnswers,
+  buildDialogModelQuestions,
+  credentialsPath,
+  resolveDialogModelConfig,
+  settingsPath,
+  summarizeDialogModel,
+  writeCredentialsFile,
+  writeSettingsFile,
+} from './weixin/dialog-config.js'
+import type { DialogModelQuestions } from './weixin/dialog-config.js'
 
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.3.5'
+const VERSION = '0.3.6'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -143,6 +154,29 @@ function startDaemon(): void {
   launchctl('kickstart', `gui/${uid()}/${DAEMON_LABEL}`)
 }
 
+/**
+ * 运行状态：launchd 守护是否加载运行 + 哪些账号的网关实例在跑。
+ * 锁列表已由 findHeldGatewayLocks 过滤（只含存活网关进程的锁），无需再探活。
+ */
+function printGatewayStatus(): void {
+  const svc = spawnSync('launchctl', ['print', `gui/${uid()}/${DAEMON_LABEL}`], { encoding: 'utf8' })
+  if (svc.status === 0 && svc.stdout.includes('state = running')) {
+    console.log(`后台守护（launchd ${DAEMON_LABEL}）: ✅ 运行中`)
+  } else if (svc.status === 0) {
+    console.log(`后台守护（launchd ${DAEMON_LABEL}）: ⏸ 已加载但未运行`)
+  } else {
+    console.log(`后台守护（launchd ${DAEMON_LABEL}）: ⚪ 未加载（未部署或已 bootout）`)
+  }
+  const held = findHeldGatewayLocks()
+  if (held.length === 0) {
+    console.log('网关实例: ⚪ 无（没有任何网关在运行）')
+    return
+  }
+  for (const h of held) {
+    console.log(`网关实例: ${h.accountId || '(默认账号)'}（PID ${h.pid}）✅ 运行中`)
+  }
+}
+
 /** setup：检测/装 dsh → 建 profile+装插件 → 验证。幂等，可在已装环境重跑。 */
 async function setup(): Promise<void> {
   console.log('[dsh-weixin] 检测 dsh...')
@@ -191,12 +225,28 @@ async function setup(): Promise<void> {
     console.error(`[dsh-weixin] AI 配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  console.log('\n✅ 环境就绪！还剩两步（一次性）：')
-  console.log('  1. 配置对话模型 provider：在 ~/.dsh/settings.yaml 配置 llm-pi-ai（AI 网关，媒体 AI 凭据已在上方引导）')
-  console.log('  2. 微信端启用 ClawBot 插件：微信 → 我 → 设置 → 插件')
+  // 对话模型 provider（~/.dsh/settings.yaml + .credentials.yaml）交互式引导
+  try {
+    await configureDialogModelInteractively()
+  } catch (err) {
+    console.error(`[dsh-weixin] 对话模型配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  console.log('\n✅ 环境就绪！')
+  const dialogSettings = fs.existsSync(settingsPath()) ? fs.readFileSync(settingsPath(), 'utf8') : ''
+  const dialogCfg = resolveDialogModelConfig(dialogSettings)
+  const steps = ['微信端启用 ClawBot 插件：微信 → 我 → 设置 → 插件']
+  if (dialogCfg) {
+    console.log(`  ✅ 对话模型已配置: ${dialogCfg.provider} / ${dialogCfg.model}（${dialogCfg.baseURL}）`)
+  } else {
+    steps.unshift('配置对话模型 provider：重跑 dsh-weixin setup 引导（或手动编辑 ~/.dsh/settings.yaml 配置 llm-pi-ai）')
+  }
+  steps.forEach((s, i) => console.log(`  ${i + 1}. ${s}`))
   console.log('\n接下来：')
-  console.log('  dsh-weixin login    # 扫码登录（自动避让后台守护，登录后自动交回常驻）')
-  console.log('  dsh-weixin run      # 前台启动网关（已有实例会自动拦截）')
+  console.log('  dsh-weixin login     # 扫码登录（自动避让后台守护，登录后自动交回常驻）')
+  console.log('  dsh-weixin run       # 前台启动网关（已有实例会自动拦截）')
+  console.log('  dsh-weixin status    # 查看守护与网关状态')
+  console.log('  dsh-weixin stop      # 停止后台守护（start 重新拉起）')
 }
 
 /**
@@ -262,6 +312,75 @@ async function askAiFields(
     }
     if (input !== '' && input !== q.defaultValue) {
       answers[q.id] = input
+    }
+  }
+}
+
+/**
+ * 对话模型 provider 配置引导（~/.dsh/settings.yaml + .credentials.yaml）。
+ * 已配置：摘要 + 回车保持 / r 重配 / x 清除；未配置：逐字段问答（网关地址与
+ * 密钥必填，key 默认复用 AI 能力全局凭据 AI_GATEWAY_KEY）。写入 settings.yaml
+ * 的 llm-pi-ai/agent-default-model 块与 .credentials.yaml 的 COMPANY_API_KEY。
+ * 非 TTY 只打印手动指引，不阻塞。
+ */
+async function configureDialogModelInteractively(): Promise<void> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log('\n[dsh-weixin] 非交互终端，跳过对话模型配置问答。手动配置：')
+    console.log('  编辑 ~/.dsh/settings.yaml 配置 llm-pi-ai.providers.<name>（apiKeyEnv: COMPANY_API_KEY，api: anthropic-messages）')
+    console.log('  与 agent-default-model（provider/model），密钥写入 ~/.dsh/.credentials.yaml')
+    return
+  }
+  console.log('\n🔧 对话模型配置引导（默认 deepseek/DeepSeek-V4-Flash，AI 网关 anthropic-messages）')
+  loadEnvFile() // 让 key 默认值能看到 .env 里的 AI_GATEWAY_KEY
+  const settingsText = fs.existsSync(settingsPath()) ? fs.readFileSync(settingsPath(), 'utf8') : ''
+  const credText = fs.existsSync(credentialsPath()) ? fs.readFileSync(credentialsPath(), 'utf8') : ''
+  const q = buildDialogModelQuestions(process.env, settingsText, credText)
+  const answers: Record<string, string> = {}
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    if (q.configured && q.action) {
+      const a = (await rl.question(q.action.prompt)).trim().toLowerCase()
+      if (a === '') {
+        // 回车保持现有配置
+      } else if (a === 'x') {
+        answers['dialog.action'] = 'x'
+      } else if (a === 'r') {
+        await askDialogFields(rl, q, answers)
+      }
+    } else {
+      await askDialogFields(rl, q, answers)
+    }
+  } finally {
+    rl.close()
+  }
+
+  const { settingsNext, credNext } = applyDialogModelAnswers(settingsText, credText, answers)
+  if (settingsNext === settingsText && credNext === credText) {
+    console.log('\n[dsh-weixin] 对话模型配置无变化')
+  } else if (writeSettingsFile(settingsNext) && writeCredentialsFile(credNext)) {
+    console.log(`\n[dsh-weixin] 已写入对话模型配置: ${settingsPath()} + ${credentialsPath()}`)
+  } else {
+    console.log('\n[dsh-weixin] 无法写入 ~/.dsh 配置文件（权限？），请手动配置：')
+    console.log(settingsNext)
+    console.log(credNext)
+  }
+  console.log('\n[dsh-weixin] 对话模型配置摘要：')
+  console.log(summarizeDialogModel(settingsNext))
+}
+
+/** 对话模型逐字段问答；空输入保持默认/跳过（required 字段必填循环），与当前值相同的输入不落盘。 */
+async function askDialogFields(
+  rl: ReturnType<typeof createInterface>,
+  q: DialogModelQuestions,
+  answers: Record<string, string>,
+): Promise<void> {
+  for (const f of q.fields) {
+    let input = (await rl.question(f.prompt)).trim()
+    if (f.required) {
+      while (input === '') input = (await rl.question(f.prompt)).trim()
+    }
+    if (input !== '' && input !== f.defaultValue) {
+      answers[f.id] = input
     }
   }
 }
@@ -348,6 +467,39 @@ program
     args.push('--session-mode', opts.sessionMode)
     const code = await runDsh(args)
     process.exit(code)
+  })
+
+program
+  .command('stop')
+  .description('停止后台守护（launchd 服务；前台实例按 Ctrl+C）')
+  .action(() => {
+    stopDaemon()
+    console.log('⏹  已停止后台守护（dsh-weixin start 重新拉起）')
+  })
+
+program
+  .command('start')
+  .description('启动后台守护（launchd 常驻，崩溃自动重启）')
+  .action(() => {
+    startDaemon()
+    console.log('🚀 已启动后台守护（dsh-weixin status 查看状态）')
+  })
+
+program
+  .command('restart')
+  .description('重启后台守护（stop → start）')
+  .action(async () => {
+    stopDaemon()
+    await sleep(2000)
+    startDaemon()
+    console.log('🔄 已重启后台守护（dsh-weixin status 查看状态）')
+  })
+
+program
+  .command('status')
+  .description('查看后台守护与网关实例状态')
+  .action(() => {
+    printGatewayStatus()
   })
 
 program.parse()

@@ -108,5 +108,6 @@ export function findConflict(
 export function printLockConflict(pid: string): void {
   console.error(`⚠️⚠️  检测到已有微信网关实例在运行（PID ${pid}）⚠️⚠️`)
   console.error('   同一账号同时只能有一个网关实例，本次启动已取消。')
-  console.error('   停掉旧实例后重试：前台实例按 Ctrl+C；launchd 守护执行 ./scripts/weixin-gateway.sh stop')
+  console.error('   停掉旧实例后重试：前台实例按 Ctrl+C；后台守护执行 dsh-weixin stop')
+  console.error('   （仓库开发模式也可用 ./scripts/weixin-gateway.sh stop）')
 }

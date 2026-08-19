@@ -192,8 +192,8 @@ export interface AiCapabilityQuestions {
   fields: AiConfigQuestion[]
 }
 
-/** 密钥打码显示（sk-****末4位），避免明文出现在终端。 */
-function maskKey(key: string): string {
+/** 密钥打码显示（sk-****末4位），避免明文出现在终端。dialog-config 复用。 */
+export function maskKey(key: string): string {
   if (key.length <= 8) return '****'
   return `${key.slice(0, 3)}****${key.slice(-4)}`
 }
