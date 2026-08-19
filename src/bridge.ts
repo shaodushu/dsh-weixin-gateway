@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import { raceWithTimeout } from './with-timeout.js'
+import { raceWithTimeout, withIdleTimeout } from './with-timeout.js'
 import type { AgentHandle, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -20,6 +20,25 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 // 空类型导入用于携带 loader Context merge（await loader 就绪）
 import type {} from '@deepseek-ai/cordis-plugin-loader'
+
+/**
+ * 超时配置（一次 ask 的两层保护）：
+ * - 整轮超时：所有工具往返的总预算，防 agent 失控循环（默认 15 分钟）。
+ * - 空闲超时：LLM 推理/工具执行连续 N 秒无任何会话事件时触发，防 AI 网关
+ *   挂起卡死轮询（默认 180s）。活动事件（文本增量、工具调用等）会刷新计时，
+ *   多轮工具往返的长时间正常任务不会被误杀。
+ * 均可通过环境变量覆盖：OPENCLAW_ASK_TIMEOUT_SEC（整轮）、
+ * OPENCLAW_ASK_IDLE_TIMEOUT_SEC（空闲）。
+ */
+const DEFAULT_TURN_TIMEOUT_SEC = 900
+const DEFAULT_IDLE_TIMEOUT_SEC = 180
+
+function resolveTimeoutSec(envName: string, fallback: number): number {
+  const raw = process.env[envName]
+  if (!raw) return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
 
 /** 一次 ask 的结果。 */
 export interface AskResult {
@@ -134,10 +153,11 @@ export interface StreamCallbacks {
   onTurnStart?: () => void
   /** 模型请求调用工具时（tool/call 事件；参数为模型产出的原始 JSON 字符串）。 */
   onToolCall?: (name: string, args: string) => void
+  /** 覆盖整轮超时（秒）。缺省读 OPENCLAW_ASK_TIMEOUT_SEC，未设则 900。 */
+  turnTimeoutSec?: number
+  /** 覆盖空闲超时（秒）。缺省读 OPENCLAW_ASK_IDLE_TIMEOUT_SEC，未设则 180。 */
+  idleTimeoutSec?: number
 }
-
-/** 一次 ask 的 LLM 推理超时（秒）。 */
-const ASK_TIMEOUT_SEC = 180
 
 /**
  * 从 assistant/chunk 事件中提取应喂给发送器的流式文本（纯函数，可单测）。
@@ -196,9 +216,14 @@ export async function askAgentStreaming(
   const firstSeq = agent.session.seq
   const streamState: StreamChunkState = { blockHadDelta: false }
 
+  // 空闲超时的刷新钩子：订阅先于 guard 创建，事件可能先于 guard 到达——
+  // 但 guard 创建前的事件本就无需刷新（计时尚未开始）
+  let resetIdle: (() => void) | undefined
+
   // 订阅会话事件流（agent 作用域 ctx；只在本 ask 的生命周期内有效）
   const off = agent.ctx.on('session/event', (_session, event) => {
     if (event.seq < firstSeq) return
+    resetIdle?.() // 本 ask 的任何活动事件都刷新空闲计时
     if (event.type === 'assistant/chunk') {
       const delta = applyStreamChunk(event, streamState)
       if (delta) cbs.onDelta?.(delta)
@@ -213,11 +238,17 @@ export async function askAgentStreaming(
     }
   })
 
-  // 超时保护：AI 网关偶发挂起会让 whenIdle() 永不 resolve，而网关轮询
-  // 串行 await 本条消息 → 单条消息卡死整个网关（实测：收到消息后 16 分钟
-  // 无任何日志、期间所有消息排队）。超时后抛错让调用方回复"处理失败"并解冻
-  // 轮询。局限：底层 LLM 推理无法中止，超时后仍在后台跑（其产出不再被聚合，
-  // 事件订阅已随 finally 移除），属可接受的保底。
+  // 两层超时保护（语义见文件头注释）：空闲超时防 AI 网关偶发挂起让 whenIdle()
+  // 永不 resolve、单条消息卡死整个网关轮询（实测：收到消息后 16 分钟无任何
+  // 日志、期间所有消息排队）；整轮超时防 agent 工具循环失控。活动事件刷新
+  // 空闲计时——多轮工具往返的长时间正常任务（如装插件 47 次工具调用）不会
+  // 被误杀。局限：底层 LLM 推理无法中止，超时后仍在后台跑（其产出不再被
+  // 聚合，事件订阅已随 finally 移除），属可接受的保底。
+  const turnTimeoutSec =
+    cbs.turnTimeoutSec ?? resolveTimeoutSec('OPENCLAW_ASK_TIMEOUT_SEC', DEFAULT_TURN_TIMEOUT_SEC)
+  const idleTimeoutSec =
+    cbs.idleTimeoutSec ?? resolveTimeoutSec('OPENCLAW_ASK_IDLE_TIMEOUT_SEC', DEFAULT_IDLE_TIMEOUT_SEC)
+  let guard: ReturnType<typeof withIdleTimeout> | undefined
   try {
     agent.followup(
       createUserMessage({
@@ -225,13 +256,20 @@ export async function askAgentStreaming(
         source: { kind: 'user' },
       }),
     )
-    await raceWithTimeout(
+    guard = withIdleTimeout(
       agent.whenIdle(),
-      ASK_TIMEOUT_SEC * 1000,
-      () => new Error(`LLM 推理超时（>${ASK_TIMEOUT_SEC}s），请稍后再试`),
+      idleTimeoutSec * 1000,
+      () => new Error(`AI 响应超时（${idleTimeoutSec}s 无输出），请稍后再试`),
+    )
+    resetIdle = guard.reset
+    await raceWithTimeout(
+      guard.promise,
+      turnTimeoutSec * 1000,
+      () => new Error(`任务处理超时（>${turnTimeoutSec}s），请稍后再试`),
     )
     return summarize(agent.session.events, firstSeq)
   } finally {
+    guard?.dispose()
     off()
   }
 }

@@ -69,5 +69,6 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 - launchd 启停命令（`dsh-weixin stop/start/restart/status`）：已完成（0.3.6）
 - 流式渐进回复（回复分段实时发送，markdown 安全分片 + 标记剥离）：已完成
 - 文生图体验（generate_image 工具调用时占位回复 + 各能力 fetch 超时保护 + 工具调用耗时日志）：已完成（0.3.5）
+- 消息超时两层保护（空闲 180s 活动刷新制 + 整轮 900s 上限，`OPENCLAW_ASK_IDLE_TIMEOUT_SEC` / `OPENCLAW_ASK_TIMEOUT_SEC` 可配，超时文案区分"AI 响应超时 / 任务处理超时"）：已完成（0.3.8）
 - 限制：语音条回复不支持——官方协议不渲染（Issue #78/#254 实测），`[tts:]` 文本并入文字回复
 - 注意：dsh 为 0.1.0-rc 预发布，接口可能破坏性变更

@@ -7,7 +7,7 @@
  * 时用完整文本补齐，有增量的块跳过（幂等），reasoning/工具调用块文本为空
  * 不误发。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { applyStreamChunk, askAgentStreaming } from './bridge.js'
 import type { StreamChunkState } from './bridge.js'
@@ -100,8 +100,11 @@ describe('applyStreamChunk', () => {
 })
 
 describe('askAgentStreaming tool/call 转发', () => {
-  /** 轻量 mock agent 句柄：可手动 emit 会话事件，whenIdle 立即 resolve。 */
-  function mockHandle(): { handle: AgentHandle; emit: (e: SessionEvent) => void } {
+  /** 轻量 mock agent 句柄：可手动 emit 会话事件，whenIdle 立即 resolve（可用 neverIdle 模拟挂起）。 */
+  function mockHandle(opts: { neverIdle?: boolean } = {}): {
+    handle: AgentHandle
+    emit: (e: SessionEvent) => void
+  } {
     const listeners: Array<(session: unknown, event: SessionEvent) => void> = []
     const agent = {
       session: { seq: 0, events: [] },
@@ -112,7 +115,7 @@ describe('askAgentStreaming tool/call 转发', () => {
         },
       },
       followup: () => undefined,
-      whenIdle: async () => undefined,
+      whenIdle: () => (opts.neverIdle ? new Promise<void>(() => {}) : Promise.resolve()),
     } as unknown as AgentHandle
     return {
       handle: { agent } as unknown as AgentHandle,
@@ -141,5 +144,46 @@ describe('askAgentStreaming tool/call 转发', () => {
     emit({ seq: 2, type: 'assistant/chunk', data: { chunk: { type: 'block-start', index: 0 } } } as unknown as SessionEvent)
     await p
     expect(calls).toEqual([])
+  })
+
+  it('空闲超时：LLM 挂起（whenIdle 永不 resolve、无任何事件）→ 超时 reject', async () => {
+    vi.useFakeTimers()
+    try {
+      const { handle } = mockHandle({ neverIdle: true })
+      const p = askAgentStreaming(handle, '你好', { idleTimeoutSec: 60 })
+      // 立即挂 handler：reject 发生在 advance 期间，晚了会被判 unhandled
+      let rejected: Error | undefined
+      p.catch((e) => {
+        rejected = e
+      })
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(rejected?.message).toBe('AI 响应超时（60s 无输出），请稍后再试')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('空闲超时被活动事件刷新：持续事件不超时，事件停止后才超时（长任务不误杀）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { handle, emit } = mockHandle({ neverIdle: true })
+      const p = askAgentStreaming(handle, '你好', { idleTimeoutSec: 60 })
+      let settled = false
+      p.catch(() => {
+        settled = true
+      })
+      // 事件持续（间隔 < 60s），跨过数个空闲周期也不超时
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(59_000)
+        emit(chunk(1 + i, 'text-delta', 'a'))
+      }
+      expect(settled).toBe(false)
+      // 事件停止 → 60s 后超时
+      await vi.advanceTimersByTimeAsync(61_000)
+      expect(settled).toBe(true)
+      await expect(p).rejects.toThrow('AI 响应超时')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
