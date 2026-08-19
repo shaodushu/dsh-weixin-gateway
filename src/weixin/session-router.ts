@@ -22,27 +22,40 @@ const ROOM_KEY = '__room__'
 export class SessionRouter {
   private readonly handles = new Map<string, AgentHandle>()
   private readonly mode: SessionMode
+  private readonly roomKey: string
 
   constructor(
     private readonly ctx: Context,
     mode: SessionMode,
+    /** 会话 cwd（缺省 process.cwd()）。测试注入独立 cwd 以隔离持久化根目录。 */
+    private readonly cwd?: string,
+    /** 是否尝试恢复持久化会话。测试禁用：persistence 按 id 跨根扫描，恢复/创建都可能撞上真实网关的同名会话。 */
+    private readonly resume = true,
+    /** 房间模式会话 key（缺省 __room__）。测试用专属 key：persistence 按 id 跨根定位，与线上共用 __room__ 必撞。 */
+    roomKey = ROOM_KEY,
   ) {
     this.mode = mode
+    this.roomKey = roomKey
     logger.info(`session-router: mode=${mode}`)
   }
 
   /** 取某用户的 agent 会话：优先恢复持久化会话，否则新建。 */
   async getSession(userId: string): Promise<AgentHandle> {
-    const key = this.mode === 'room' ? ROOM_KEY : userId
+    const key = this.mode === 'room' ? this.roomKey : userId
     let handle = this.handles.get(key)
     if (!handle) {
       const label = this.mode === 'room' ? 'room' : `user ${userId}`
-      // 有持久化后端时尝试恢复（stable sessionId = key）
-      try {
-        handle = await resumeGatewayAgent(this.ctx, key)
-        logger.info(`session-router: resumed persisted session for ${label}`)
-      } catch {
-        handle = await createGatewayAgent(this.ctx, undefined, key)
+      if (this.resume) {
+        // 有持久化后端时尝试恢复（stable sessionId = key）
+        try {
+          handle = await resumeGatewayAgent(this.ctx, key)
+          logger.info(`session-router: resumed persisted session for ${label}`)
+        } catch {
+          handle = undefined
+        }
+      }
+      if (!handle) {
+        handle = await createGatewayAgent(this.ctx, this.cwd, key)
         logger.info(`session-router: created fresh agent session for ${label}`)
       }
       this.handles.set(key, handle)

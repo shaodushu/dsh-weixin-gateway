@@ -32,13 +32,45 @@ export interface Config {
 }
 
 /**
- * 测试专用 session key：room 用 router 的 ROOM_KEY，per-user 用两个测试用户 id。
- * 这些会话在 JSONL 持久化后端落盘后，下次测试会 resume 旧上下文导致断言不稳
- * （实测：room 残留 __room__ 后 A 首条回复为空）。因此测试开始前统一清理。
+ * 测试专用会话 cwd：dsh 会话持久化按 cwd 派生根目录（--<编码>--，编码见
+ * dsh-session-persistence-jsonl 的 projectKey）。独立 cwd 让测试会话落在
+ * 自己的根下，整根清理即可——绝不触碰真实网关的会话目录。
+ *
+ * 测试专用 room key：persistence 按**会话 id** 跨根定位日志（loadStored /
+ * 创建时 findLog 扫所有根），与线上网关共用 `__room__` 必撞——曾实测
+ * 加载到线上坏日志（seq gap）导致首条回复为空。key 字符串不影响 room
+ * 语义（共享上下文），用专属 key 物理隔离。
  */
-const TEST_SESSION_KEYS = ['__room__', 'user-A-xiaoming', 'user-B-xiaohong']
+const TEST_CWD = path.join(os.tmpdir(), 'dsh-session-test')
+const TEST_ROOM_KEY = '__room__-test'
 
-/** 清理测试专用持久化会话（遍历所有 cwd root），保证测试幂等可重复。 */
+/** 复刻 dsh-session-persistence-jsonl 的 projectKey（lib/index.js）：cwd → 会话根目录名。 */
+function projectKey(cwd: string): string {
+  let readable = ''
+  let separatorRun = false
+  for (let i = 0; i < cwd.length; i++) {
+    const code = cwd.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch === '/' || ch === '\\' || ch === ':') {
+      if (!separatorRun) readable += '-'
+      separatorRun = true
+    } else if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      readable += ch
+      separatorRun = false
+    } else {
+      readable += `~${code.toString(16).toUpperCase().padStart(4, '0')}`
+      separatorRun = false
+    }
+  }
+  return `--${(readable.replace(/^-+/, '') || 'root').slice(0, 251)}--`
+}
+
+/**
+ * 清理测试持久化会话，保证测试幂等可重复。范围严格限定：
+ * - 测试自己的根（TEST_CWD 派生）**整根删除**——只可能装测试会话
+ * - 其余根只按测试专用名清理 per-user 残留（历史版本测试留下的）；
+ *   `__room__` 等线上会话名一律不碰
+ */
 function cleanupTestSessions(): void {
   const home = process.env.DSH_HOME?.trim() || path.join(os.homedir(), '.dsh')
   const sessionsRoot = path.join(home, 'sessions')
@@ -48,9 +80,19 @@ function cleanupTestSessions(): void {
   } catch {
     return
   }
+  const testRoot = projectKey(TEST_CWD)
   let cleaned = 0
   for (const root of roots) {
-    for (const key of TEST_SESSION_KEYS) {
+    if (root === testRoot) {
+      const own = path.join(sessionsRoot, root)
+      if (fs.existsSync(own)) {
+        fs.rmSync(own, { recursive: true, force: true })
+        cleaned++
+      }
+      continue
+    }
+    // 测试专用名（per-user 两个测试用户），任意根下都是测试残留
+    for (const key of ['user-A-xiaoming', 'user-B-xiaohong']) {
       const target = path.join(sessionsRoot, root, key)
       if (fs.existsSync(target)) {
         fs.rmSync(target, { recursive: true, force: true })
@@ -64,7 +106,9 @@ function cleanupTestSessions(): void {
 export function apply(ctx: Context, config: Config): void {
   void (async () => {
     cleanupTestSessions()
-    const router = new SessionRouter(ctx, config.mode)
+    // resume=false + 专属 room key + 独立 cwd：persistence 按 id 跨根定位，
+    // 与线上网关共用 __room__ 会加载到线上坏日志（实测 seq gap 空回复）
+    const router = new SessionRouter(ctx, config.mode, TEST_CWD, false, TEST_ROOM_KEY)
     const results: string[] = []
     try {
       // 用户 A（小明）
@@ -80,7 +124,7 @@ export function apply(ctx: Context, config: Config): void {
       // 1. A 记住名字
       const a1 = await router.getSession(userA)
       const r1 = await askAgentStreaming(a1, '记住我的名字叫小明，只回复"记住了"', {})
-      step('A 记住名字', r1.text.includes('记住') || r1.text.length > 0, `A1=${r1.text.slice(0, 40)}`)
+      step('A 记住名字', r1.text.includes('记住') || r1.text.length > 0, `A1=${r1.text.slice(0, 40)}${r1.error !== undefined ? ` err=${r1.error}` : ''}`)
 
       // 2. B 问名字（per-user 应隔离；room 可能共享）
       const b1 = await router.getSession(userB)
