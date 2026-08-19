@@ -47,11 +47,12 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 
 | 模块 | 说明 |
 |---|---|
-| `src/bridge.ts` | AgentBridge：创建 agent 会话、`followup` 注入消息、聚合回复（与消息来源解耦） |
+| `src/bridge.ts` | AgentBridge：创建 agent 会话、`followup` 注入消息、流式事件转发（onDelta 文本增量 / onToolCall 工具调用）、聚合回复（与消息来源解耦） |
 | `src/runner.ts` | CLI 驱动（`gateway.patch.yml`）：headless 任务的注入闭环演示 |
 | `src/weixin/` | 微信协议层（移植自 `Tencent/openclaw-weixin`，MIT）：api / auth / cdn / media / messaging / storage |
-| `src/weixin/driver.ts` | 微信驱动：扫码登录 → `notifyStart` → `getUpdates` 长轮询 → 消息→agent→回复 |
-| `src/weixin/entry.ts` / `gateway.ts` | 命令行解析（`--weixin-login` / `--weixin-run`）与网关应用插件 |
+| `src/weixin/driver.ts` | 微信驱动：扫码登录 → `notifyStart` → `getUpdates` 长轮询 → 消息→agent→回复（generate_image 占位回复） |
+| `src/weixin/ai-service.ts` | AI 能力 HTTP 封装（ASR/文生图/视觉/TTS）：fetch 超时保护（图像 150s、其余 60s）、SILK→WAV、base64 传图 |
+| `src/weixin/entry.ts` / `gateway.ts` | 命令行解析（`--weixin-login` / `--weixin-run`）与网关应用插件（注册 generate_image 工具） |
 | `src/weixin/run-lock.ts` | 实例互斥锁（账号级 pidfile，见[使用手册](usage.md#实例互斥同一账号只能一个网关)） |
 | `src/weixin/ai-config.ts` | AI 能力配置中枢：能力级独立配置（端点+密钥+模型）解析、.env upsert、setup 引导问题构建 |
 | `src/cli.ts` | `dsh-weixin` 引导 CLI（bin 入口）：setup / login / run / update |
@@ -64,5 +65,6 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 - 媒体消息：已完成。入站（图片 AI 视觉描述 / 语音转文字 / 文件 / 视频）+ 出站（`[image:]` `[video:]` `[file:]` 标记按 MIME 路由发送，图片/文件已实测）
 - AI 能力独立配置 + setup 交互引导：已完成。新增 AI 能力时在 `src/weixin/ai-config.ts` 的 `AI_CAPABILITIES` 注册一组定义（前缀/默认模型/端点路径）即可，cli 引导与摘要自动覆盖
 - 流式渐进回复（回复分段实时发送，markdown 安全分片 + 标记剥离）：已完成
+- 文生图体验（generate_image 工具调用时占位回复 + 各能力 fetch 超时保护 + 工具调用耗时日志）：已完成（0.3.5）
 - 限制：语音条回复不支持——官方协议不渲染（Issue #78/#254 实测），`[tts:]` 文本并入文字回复
 - 注意：dsh 为 0.1.0-rc 预发布，接口可能破坏性变更
