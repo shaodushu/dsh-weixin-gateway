@@ -9,7 +9,27 @@
 3. **微信端启用 ClawBot 插件（最容易漏）**：微信 → 我 → 设置 → 插件 → 启用 ClawBot；不启用则消息不会路由到网关，表现为"网关在跑但收不到任何消息"
 4. **（媒体 AI 功能）AI 能力凭据**：语音转文字 / 图像理解 / 文生图 / 语音合成**每个能力可独立配置**（各自的端点+密钥+模型，见文末[凭据表](#依赖与凭据位置)），也可只配全局一组 `AI_GATEWAY_BASE_URL` + `AI_GATEWAY_KEY` 让 4 个能力共用。未配置的能力静默降级，收发消息不受影响。**`dsh-weixin setup` 会交互式引导逐项配置并写入 `~/.openclaw/weixin-dsh/.env`，无需手动编辑**。
 
-## 0. 安装 dsh-weixin 并准备环境（一次性）
+## 0. 快速开始（一键体验）
+
+如果你只想**最快看到二维码**，不需要 AI 配置问答：
+
+```bash
+npx dsh-weixin-gateway@latest quickstart
+```
+
+`quickstart` 合并了环境准备 + 扫码登录两步：
+1. 自动检测/安装 dsh，创建 headless profile，安装插件并验证
+2. 跳过 AI 能力配置和对话模型配置问答，直接进入扫码登录
+3. 扫码完成后自动交回后台守护常驻
+
+AI 配置可稍后单独补充：
+```bash
+npx dsh-weixin-gateway@latest setup
+```
+
+## 1. 完整安装与准备环境（一次性）
+
+传统方式（交互式配置引导更完整）：
 
 ```bash
 # 1) 安装插件（自带 dsh-weixin 引导命令）

@@ -19,12 +19,24 @@
 | **使用者**：只想把微信接入 dsh 当机器人跑 | [使用手册 →](docs/usage.md) 安装 → 登录 → 启动 |
 | **开发者**：clone 仓库改代码 / 调试 | [开发文档 →](docs/development.md) 构建 → 测试 → 部署 |
 
-### 使用者 3 步
+### 使用者 3 步 → 1 步
+
+```bash
+npx dsh-weixin-gateway@latest quickstart    # 一键：环境准备 + 扫码登录
+```
+
+终端显示二维码，手机微信扫码即完成。后续如需补充 AI 能力配置：
+
+```bash
+npx dsh-weixin-gateway@latest setup          # 单独补充 AI 配置
+```
+
+或者传统三步方式（等价）：
 
 ```bash
 npm install -g dsh-weixin-gateway     # 安装
-dsh-weixin setup                      # 准备环境（一次性）
-dsh-weixin login                      # 扫码登录（自动进入保活）
+dsh-weixin setup                      # 准备环境（一次性，含 AI 交互引导）
+dsh-weixin login                      # 扫码登录
 ```
 
 详细步骤、前置条件、常见问题见 **[使用手册](docs/usage.md)**。

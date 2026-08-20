@@ -54,7 +54,7 @@ import type { DialogModelQuestions } from './weixin/dialog-config.js'
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.4.1'
+const VERSION = '0.4.2'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -155,6 +155,50 @@ function startDaemon(): void {
 }
 
 /**
+ * 登录核心逻辑：停止冲突守护 → 扫码登录 → 交回 daemon。返回退出码。
+ * 内置 SIGINT/SIGHUP 屏蔽，调用方无需额外处理。
+ */
+async function login(accountId?: string): Promise<number> {
+  // 登录 = 换会话：若已有实例在跑（多为 launchd daemon 拉起的网关），
+  // 自动停掉守护释放锁，让扫码直接进行；停不掉的前台实例才报错。
+  const held = findHeldGatewayLocks()
+  const conflict = findConflict(held, accountId)
+  if (conflict) {
+    stopDaemon()
+    // bootout 是异步的（launchd 先终止进程、网关退出时才释放锁）：
+    // 轮询等待锁释放，最多 5s，避免把"正在退出的 daemon"误判成前台实例
+    let still: { accountId: string; pid: string } | undefined = conflict
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline) {
+      const after = findHeldGatewayLocks()
+      still = accountId ? after.find((h) => h.accountId === accountId) : after[0]
+      if (!still) break
+      await sleep(200)
+    }
+    if (still) {
+      printLockConflict(still.pid)
+      console.error('   持锁实例是前台进程，请先按 Ctrl+C 停掉它，再重新运行 login')
+      return 1
+    }
+    console.log('⏹  已自动停止后台守护（登录结束后会自动交回常驻）')
+  }
+  // Ctrl+C（SIGINT）/ 关终端（SIGHUP）时本进程不退出：dsh 优雅退出后
+  // 继续拉起 daemon 接管，让登录进程退出不中断后台服务
+  const onSignal = (): void => undefined
+  process.on('SIGINT', onSignal)
+  process.on('SIGHUP', onSignal)
+  const args = ['--profile', PROFILE, '--weixin-login']
+  if (accountId) args.push(accountId)
+  const code = await runDsh(args)
+  process.off('SIGINT', onSignal)
+  process.off('SIGHUP', onSignal)
+  // 登录进程已退出（Ctrl+C 或失败）→ 交回 launchd 守护（登录持久化了新 token）
+  startDaemon()
+  console.log('🚀 已交回后台守护常驻，无需再碰终端')
+  return code
+}
+
+/**
  * 运行状态：launchd 守护是否加载运行 + 哪些账号的网关实例在跑。
  * 锁列表已由 findHeldGatewayLocks 过滤（只含存活网关进程的锁），无需再探活。
  */
@@ -178,7 +222,7 @@ function printGatewayStatus(): void {
 }
 
 /** setup：检测/装 dsh → 建 profile+装插件 → 验证。幂等，可在已装环境重跑。 */
-async function setup(): Promise<void> {
+async function setup(opts?: { skipAiConfig?: boolean; skipDialogModel?: boolean; skipSummary?: boolean }): Promise<void> {
   console.log('[dsh-weixin] 检测 dsh...')
   if (!detectDsh()) {
     console.log('[dsh-weixin] 未检测到 dsh，尝试全局安装 @deepseek-ai/dsh...')
@@ -219,17 +263,30 @@ async function setup(): Promise<void> {
 
   // AI 能力（语音转文字/图像理解/文生图/语音合成）交互式配置引导；
   // 失败或用户中断不阻断 setup 主流程
-  try {
-    await configureAiInteractively()
-  } catch (err) {
-    console.error(`[dsh-weixin] AI 配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
+  if (!opts?.skipAiConfig) {
+    try {
+      await configureAiInteractively()
+    } catch (err) {
+      console.error(`[dsh-weixin] AI 配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    console.log('[dsh-weixin] 跳过 AI 能力配置（后续可运行 dsh-weixin setup 单独补充）')
   }
 
   // 对话模型 provider（~/.dsh/settings.yaml + .credentials.yaml）交互式引导
-  try {
-    await configureDialogModelInteractively()
-  } catch (err) {
-    console.error(`[dsh-weixin] 对话模型配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
+  if (!opts?.skipDialogModel) {
+    try {
+      await configureDialogModelInteractively()
+    } catch (err) {
+      console.error(`[dsh-weixin] 对话模型配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    console.log('[dsh-weixin] 跳过对话模型配置（后续可运行 dsh-weixin setup 单独补充）')
+  }
+
+  if (opts?.skipSummary) {
+    console.log('\n✅ 环境基础就绪！')
+    return
   }
 
   console.log('\n✅ 环境就绪！')
@@ -415,42 +472,7 @@ program
   .description('扫码登录微信账号（自动避让后台守护；Ctrl+C 后自动交回 daemon 常驻）')
   .argument('[accountId]', '账号 id（可选）')
   .action(async (accountId?: string) => {
-    // 登录 = 换会话：若已有实例在跑（多为 launchd daemon 拉起的网关），
-    // 自动停掉守护释放锁，让扫码直接进行；停不掉的前台实例才报错。
-    const held = findHeldGatewayLocks()
-    const conflict = findConflict(held, accountId)
-    if (conflict) {
-      stopDaemon()
-      // bootout 是异步的（launchd 先终止进程、网关退出时才释放锁）：
-      // 轮询等待锁释放，最多 5s，避免把"正在退出的 daemon"误判成前台实例
-      let still: { accountId: string; pid: string } | undefined = conflict
-      const deadline = Date.now() + 5000
-      while (Date.now() < deadline) {
-        const after = findHeldGatewayLocks()
-        still = accountId ? after.find((h) => h.accountId === accountId) : after[0]
-        if (!still) break
-        await sleep(200)
-      }
-      if (still) {
-        printLockConflict(still.pid)
-        console.error('   持锁实例是前台进程，请先按 Ctrl+C 停掉它，再重新运行 login')
-        process.exit(1)
-      }
-      console.log('⏹  已自动停止后台守护（登录结束后会自动交回常驻）')
-    }
-    // Ctrl+C（SIGINT）/ 关终端（SIGHUP）时本进程不退出：dsh 优雅退出后
-    // 继续拉起 daemon 接管，让登录进程退出不中断后台服务
-    const onSignal = (): void => undefined
-    process.on('SIGINT', onSignal)
-    process.on('SIGHUP', onSignal)
-    const args = ['--profile', PROFILE, '--weixin-login']
-    if (accountId) args.push(accountId)
-    const code = await runDsh(args)
-    process.off('SIGINT', onSignal)
-    process.off('SIGHUP', onSignal)
-    // 登录进程已退出（Ctrl+C 或失败）→ 交回 launchd 守护（登录持久化了新 token）
-    startDaemon()
-    console.log('🚀 已交回后台守护常驻，无需再碰终端')
+    const code = await login(accountId)
     process.exit(code)
   })
 
@@ -500,6 +522,18 @@ program
   .description('查看后台守护与网关实例状态')
   .action(() => {
     printGatewayStatus()
+  })
+
+program
+  .command('quickstart')
+  .description('一键体验：环境准备 + 扫码登录（跳过 AI 配置，可后续 dsh-weixin setup 补充）')
+  .argument('[accountId]', '账号 id（可选）')
+  .action(async (accountId?: string) => {
+    // 合并 setup（跳过 AI 问答和对话模型配置） + login（扫码登录）
+    // 环境就绪后直接进入扫码登录，让用户最快看到二维码
+    await setup({ skipAiConfig: true, skipDialogModel: true, skipSummary: true })
+    const code = await login(accountId)
+    process.exit(code)
   })
 
 program.parse()
