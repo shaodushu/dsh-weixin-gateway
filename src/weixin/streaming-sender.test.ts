@@ -173,6 +173,31 @@ describe('WeixinStreamingSender', () => {
     await sender.flush()
     expect(stuck).toBe(0)
   })
+
+  it('单词跨 delta 停顿不被阈值截断（km 与 /h 分两次到达）', async () => {
+    // 实测（2026-08-20）：模型在 "km" 与 "/h" 间停顿 670ms，80 字阈值在
+    // "km" 处触发，把 "微风 1.6 km" 发出、"/h" 落到下一条开头。
+    const { sender, sent } = makeSender()
+    const prefix = 'x'.repeat(70) + '微风 1.6 ' // 78 字符，与 "km" 凑够 80 触发阈值
+    sender.feed(prefix)
+    sender.feed('km') // 阈值触发点：单词尾巴必须留在 pending
+    sender.feed('/h')
+    sender.feed('\n\n未来 3 天预报。')
+    const r = await sender.flush()
+    // 阈值分片不包含不完整单词尾巴（旧行为 sent=['…km']，"/h" 甩到下一段）；
+    // queueSend 会 trim 尾随空格
+    expect(sent.join('')).toBe(prefix.trimEnd())
+    // 尾巴与后续内容在 flush 完整合并，"km/h" 不被劈开（flush 按行分段）
+    expect(r.textParts).toEqual(['km/h', '未来 3 天预报。'])
+  })
+
+  it('中文文本（无空格）不触发单词尾巴规则，内容完整', async () => {
+    const { sender, sent } = makeSender()
+    const text = '这是一段完全没有空格的中文长文本，用于验证阈值切分在 CJK 场景不受影响。'.repeat(3)
+    sender.feed(text)
+    const r = await sender.flush()
+    expect(sent.join('') + r.textParts.join('')).toBe(text)
+  })
 })
 
 describe('端到端：真实工具调用事件流 → 发送器', () => {

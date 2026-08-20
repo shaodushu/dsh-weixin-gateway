@@ -79,18 +79,40 @@ export class WeixinStreamingSender {
   /** 阈值发送拆分：末尾未闭合的标记行留在 pending，其余文本返回发送。 */
   private splitSendable(): { text: string; rest: string } {
     const nl = this.pending.lastIndexOf('\n')
+    let text: string
+    let rest: string
     if (nl !== -1) {
       const lastLine = this.pending.slice(nl + 1)
       if (this.looksLikeIncompleteMarker(lastLine)) {
-        return { text: this.pending.slice(0, nl + 1), rest: lastLine }
+        text = this.pending.slice(0, nl + 1)
+        rest = lastLine
+      } else {
+        text = this.pending
+        rest = ''
       }
-      return { text: this.pending, rest: '' }
+    } else if (this.looksLikeIncompleteMarker(this.pending)) {
+      // 单行且是未闭合标记（如长路径累积超阈值）→ 全部留 pending
+      text = ''
+      rest = this.pending
+    } else {
+      text = this.pending
+      rest = ''
     }
-    // 单行且是未闭合标记（如长路径累积超阈值）→ 全部留 pending
-    if (this.looksLikeIncompleteMarker(this.pending)) {
-      return { text: '', rest: this.pending }
+
+    // 防单词截断：文本以不完整单词结尾（如 "km" 而 "/h" 未到）时把单词尾巴
+    // 留 pending。实测：模型在 "km" 与 "/h" 间停顿 670ms（两个 token 分开
+    // 输出），阈值触发把 "微风 1.6 km" 发出，"/h" 落到下一条消息开头。
+    const tail = text.match(/([A-Za-z0-9][A-Za-z0-9./+-]*)$/)
+    const wordTail = tail?.[1] ?? ''
+    if (wordTail) {
+      const boundary = tail!.index ?? 0
+      // 整行都是单词（如纯英文长词/数字）则不拆：避免把整条留 pending
+      if (boundary > 0 || /[^A-Za-z0-9./+-]/.test(text)) {
+        text = text.slice(0, boundary)
+        rest = wordTail + rest
+      }
     }
-    return { text: this.pending, rest: '' }
+    return { text, rest }
   }
 
   /** 处理结束：flush 剩余文本，返回收集的媒体/TTS/文本。 */
