@@ -19,6 +19,7 @@ import { resolveStateDir } from './storage/state-dir.js'
 import {
   CDN_BASE_URL,
   DEFAULT_BASE_URL,
+  clearStaleAccountsForUserId,
   loadWeixinAccount,
   saveWeixinAccount,
   triggerWeixinChannelReload,
@@ -82,7 +83,14 @@ export async function weixinLoginWithQr(accountId?: string): Promise<ResolvedAcc
   saveWeixinAccount(wait.accountId, {
     token: wait.botToken,
     baseUrl: wait.baseUrl ?? DEFAULT_BASE_URL,
+    userId: wait.userId,
   })
+  // 同一微信用户下的旧账号全部清除，保证本地仅最新账号连接
+  //（扫码创建新 bot 后旧账号即失效；不清除会导致账号索引堆积、
+  //   网关误连过期账号空转 —— 见 account-select.ts 的 -14 失效模式说明）
+  if (wait.userId) {
+    clearStaleAccountsForUserId(wait.accountId, wait.userId)
+  }
   indexAccount(wait.accountId)
   await triggerWeixinChannelReload().catch(() => undefined)
 
