@@ -6,30 +6,33 @@
  * holding back the minimum characters needed for pattern disambiguation
  * (e.g. a trailing `*` that might become `***`).
  *
- * Constructs passed through (not filtered):
- * - Code fences (```)
- * - Inline code (`)
- * - Tables (|...|)
- * - Horizontal rules (---, ***, ___)
- * - Bold (**)
- * - Italic/bold-italic wrapping non-CJK content
- *
- * Constructs filtered (markers stripped, content kept):
- * - Italic/bold-italic wrapping CJK content
- * - Headings H5/H6 (#####, ######)
- * - Images (![alt](url)) — removed entirely
+ * 微信不渲染 markdown——所有 markdown 语法都剥离（内容保留），保证回复规整：
+ * - 表格 `| a | b |` → 纯文本行（表头+分隔行丢弃，数据行单元格用"，"连接）
+ * - 粗体/斜体/下划线（** * *** __ _ ___）→ 标记剥离，内容保留
+ * - 行内代码（`x`）→ 反引号剥离，内容保留
+ * - 代码块（``` 围栏）→ 围栏行丢弃，内容保留
+ * - 标题（# 1-6 级）→ 井号剥离，内容保留
+ * - 分隔线（--- / *** / ___）→ 整行丢弃
+ * - 引用（>）→ 标记剥离
+ * - 图片（![alt](url)）→ 整体删除（微信不渲染 markdown 图片；媒体请用 [image:] 标记）
+ * - 删除线（~~）→ 波浪号丢弃
  *
  * States:
- * - **sol** (start-of-line): checks for line-start patterns (```, >, #####, indent)
- * - **body**: scans for inline patterns (![, ~~, ***) and outputs safe chars
- * - **fence**: inside a fenced code block, passes through until closing ```
+ * - **sol** (start-of-line): checks for line-start patterns (```, >, #, |, ---, indent)
+ * - **body**: scans for inline patterns (![, `, ***) and outputs safe chars
+ * - **fence**: inside a fenced code block, passes content through until closing ```
  * - **inline**: accumulating content inside an inline marker pair
+ * - **table**: holds `|` lines until the next line decides table vs plain
  */
 export class StreamingMarkdownFilter {
   private buf = "";
   private fence = false;
   private sol = true;
-  private inl: { type: "image" | "bold3" | "italic" | "ubold3" | "uitalic"; acc: string } | null = null;
+  private inl: { type: "image" | "bold3" | "bold2" | "italic" | "ubold3" | "ubold2" | "uitalic" | "code"; acc: string } | null = null;
+  /** 表格状态：none=不在表格；hold=持有候选行待判断；active=已确认表格。 */
+  private tableMode: "none" | "hold" | "active" = "none";
+  /** 持有中的表格行（原始文本，含行尾换行）。 */
+  private tableRow = "";
 
   feed(delta: string): string {
     this.buf += delta;
@@ -42,11 +45,12 @@ export class StreamingMarkdownFilter {
 
   private pump(eof: boolean): string {
     let out = "";
-    while (this.buf) {
+    while (this.buf || (eof && this.tableMode !== "none")) {
       const sLen = this.buf.length;
       const sSol = this.sol;
       const sFence = this.fence;
       const sInl = this.inl;
+      const sTable = this.tableMode;
 
       if (this.fence) out += this.pumpFence(eof);
       else if (this.inl) out += this.pumpInline(eof);
@@ -54,18 +58,18 @@ export class StreamingMarkdownFilter {
       else out += this.pumpBody(eof);
 
       if (this.buf.length === sLen && this.sol === sSol &&
-          this.fence === sFence && this.inl === sInl) break;
+          this.fence === sFence && this.inl === sInl && this.tableMode === sTable) break;
     }
 
     if (eof && this.inl) {
-      const markers: Record<string, string> = { image: "![", bold3: "***", italic: "*", ubold3: "___", uitalic: "_" };
+      const markers: Record<string, string> = { image: "![", bold3: "***", italic: "*", ubold3: "___", uitalic: "_", code: "`" };
       out += (markers[this.inl.type] ?? "") + this.inl.acc;
       this.inl = null;
     }
     return out;
   }
 
-  /** Inside a code fence: pass content and markers through verbatim. */
+  /** Inside a code fence: pass content through, drop the fence markers. */
   private pumpFence(eof: boolean): string {
     if (this.sol) {
       if (this.buf.length < 3 && !eof) return "";
@@ -73,16 +77,14 @@ export class StreamingMarkdownFilter {
         const nl = this.buf.indexOf("\n", 3);
         if (nl !== -1) {
           this.fence = false;
-          const line = this.buf.slice(0, nl + 1);
           this.buf = this.buf.slice(nl + 1);
           this.sol = true;
-          return line;
+          return ""; // 丢弃闭合围栏行
         }
         if (eof) {
           this.fence = false;
-          const line = this.buf;
           this.buf = "";
-          return line;
+          return "";
         }
         return "";
       }
@@ -104,6 +106,15 @@ export class StreamingMarkdownFilter {
   private pumpSOL(eof: boolean): string {
     const b = this.buf;
 
+    // 非表格行到达（或 EOF）→ 结束表格，flush 持有的行
+    if (this.tableMode !== "none" && (b[0] !== "|" || eof)) {
+      const prev = this.tableRow;
+      this.tableRow = "";
+      const active = this.tableMode === "active";
+      this.tableMode = "none";
+      return active && prev ? this.renderTableRow(prev) : prev;
+    }
+
     if (b[0] === "\n") {
       this.buf = b.slice(1);
       return "\n";
@@ -115,14 +126,13 @@ export class StreamingMarkdownFilter {
         const nl = b.indexOf("\n", 3);
         if (nl !== -1) {
           this.fence = true;
-          const line = b.slice(0, nl + 1);
-          this.buf = b.slice(nl + 1);
+          this.buf = b.slice(nl + 1); // 丢弃开围栏行
           this.sol = true;
-          return line;
+          return "";
         }
         if (eof) {
           this.buf = "";
-          return b;
+          return "";
         }
         return "";
       }
@@ -130,7 +140,23 @@ export class StreamingMarkdownFilter {
       return "";
     }
 
+    if (b[0] === "|") {
+      const nl = b.indexOf("\n");
+      if (nl === -1) {
+        if (!eof) return ""; // 行未完整，等待
+        const line = b;
+        this.buf = "";
+        this.sol = true;
+        return this.tableMode === "active" ? this.renderTableRow(line) : line;
+      }
+      const line = b.slice(0, nl + 1);
+      this.buf = b.slice(nl + 1);
+      this.sol = true;
+      return this.handleTableLine(line);
+    }
+
     if (b[0] === ">") {
+      this.buf = b[1] === " " ? b.slice(2) : b.slice(1);
       this.sol = false;
       return "";
     }
@@ -139,9 +165,13 @@ export class StreamingMarkdownFilter {
       let n = 0;
       while (n < b.length && b[n] === "#") n++;
       if (n === b.length && !eof) return "";
-      if (n >= 5 && n <= 6 && n < b.length && b[n] === " ") {
+      if (n <= 6 && n < b.length && b[n] === " ") {
         this.buf = b.slice(n + 1);
         this.sol = false;
+        return "";
+      }
+      if (n === b.length && eof) {
+        this.buf = "";
         return "";
       }
       this.sol = false;
@@ -163,13 +193,15 @@ export class StreamingMarkdownFilter {
         let count = 0;
         for (let k = 0; k < j; k++) if (b[k] === ch) count++;
         if (count >= 3) {
+          // 分隔线（--- / *** / ___）→ 整行丢弃（微信不渲染）；上一行的换行已
+          // 输出，这里不补 \n（否则多一个空行）
           if (j < b.length) {
             this.buf = b.slice(j + 1);
             this.sol = true;
-            return b.slice(0, j + 1);
+            return "";
           }
           this.buf = "";
-          return b;
+          return "";
         }
       }
       this.sol = false;
@@ -178,6 +210,56 @@ export class StreamingMarkdownFilter {
 
     this.sol = false;
     return "";
+  }
+
+  /**
+   * 表格行处理（行首 `|`）：持有候选行，等下一行决定是表格还是普通管道行。
+   * - 候选行 + 分隔行（|---|）→ 表头+分隔行丢弃，进入表格态
+   * - 候选行 + 普通行 → 上一行按原样输出（非表格）
+   * - 表格态中每行在下一行到达时输出（渲染为纯文本），保证流式
+   */
+  private handleTableLine(line: string): string {
+    const body = line.replace(/\n$/, "");
+    const isSep = /^[\s|:|-]+$/.test(body) && body.includes("-") && body.includes("|");
+
+    if (this.tableMode === "hold") {
+      const prev = this.tableRow;
+      this.tableRow = "";
+      if (isSep) {
+        this.tableMode = "active";
+        return ""; // 表头 + 分隔行丢弃
+      }
+      this.tableMode = "hold";
+      this.tableRow = line;
+      return prev; // 单行管道文本（非表格）原样输出
+    }
+    if (this.tableMode === "active") {
+      if (this.tableRow === "") {
+        // 分隔行后的第一行数据：先持有（上一行是空分隔行，无可渲染内容）
+        this.tableRow = line;
+        return "";
+      }
+      const prev = this.renderTableRow(this.tableRow);
+      if (isSep) {
+        this.tableRow = "";
+        this.tableMode = "none"; // 表格中途出现分隔行 → 结束表格
+        return prev;
+      }
+      this.tableRow = line;
+      return prev;
+    }
+    // none → 候选表头
+    this.tableMode = "hold";
+    this.tableRow = line;
+    return "";
+  }
+
+  /** 表格数据行渲染为纯文本：去管道符，单元格用"，"连接。 */
+  private renderTableRow(line: string): string {
+    const body = line.replace(/\n$/, "");
+    const cells = body.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+    const row = cells.filter(Boolean).join("，");
+    return row ? `${row}\n` : "\n";
   }
 
   /** Scan line body for inline pattern triggers; output safe chars eagerly. */
@@ -198,20 +280,29 @@ export class StreamingMarkdownFilter {
         this.inl = { type: "image", acc: "" };
         return out;
       }
+      if (c === "`") {
+        out += this.buf.slice(0, i);
+        this.buf = this.buf.slice(i + 1);
+        this.inl = { type: "code", acc: "" };
+        return out;
+      }
       if (c === "~") {
-        i++;
-        continue;
+        out += this.buf.slice(0, i);
+        this.buf = this.buf.slice(i + 1);
+        return out; // 删除线波浪号丢弃（内容保留），立即续扫
       }
       if (c === "*") {
-        if (i + 2 < this.buf.length && this.buf[i + 1] === "*" && this.buf[i + 2] === "*") {
-          out += this.buf.slice(0, i);
-          this.buf = this.buf.slice(i + 3);
-          this.inl = { type: "bold3", acc: "" };
-          return out;
-        }
         if (i + 1 < this.buf.length && this.buf[i + 1] === "*") {
-          i += 2;
-          continue;
+          if (i + 2 < this.buf.length && this.buf[i + 2] === "*") {
+            out += this.buf.slice(0, i);
+            this.buf = this.buf.slice(i + 3);
+            this.inl = { type: "bold3", acc: "" };
+            return out;
+          }
+          out += this.buf.slice(0, i);
+          this.buf = this.buf.slice(i + 2);
+          this.inl = { type: "bold2", acc: "" };
+          return out;
         }
         if (i + 1 < this.buf.length && this.buf[i + 1] !== " " && this.buf[i + 1] !== "\n") {
           out += this.buf.slice(0, i);
@@ -223,15 +314,17 @@ export class StreamingMarkdownFilter {
         continue;
       }
       if (c === "_") {
-        if (i + 2 < this.buf.length && this.buf[i + 1] === "_" && this.buf[i + 2] === "_") {
-          out += this.buf.slice(0, i);
-          this.buf = this.buf.slice(i + 3);
-          this.inl = { type: "ubold3", acc: "" };
-          return out;
-        }
         if (i + 1 < this.buf.length && this.buf[i + 1] === "_") {
-          i += 2;
-          continue;
+          if (i + 2 < this.buf.length && this.buf[i + 2] === "_") {
+            out += this.buf.slice(0, i);
+            this.buf = this.buf.slice(i + 3);
+            this.inl = { type: "ubold3", acc: "" };
+            return out;
+          }
+          out += this.buf.slice(0, i);
+          this.buf = this.buf.slice(i + 2);
+          this.inl = { type: "ubold2", acc: "" };
+          return out;
         }
         if (i + 1 < this.buf.length && this.buf[i + 1] !== " " && this.buf[i + 1] !== "\n") {
           out += this.buf.slice(0, i);
@@ -251,6 +344,7 @@ export class StreamingMarkdownFilter {
       else if (this.buf.endsWith("__")) hold = 2;
       else if (this.buf.endsWith("*")) hold = 1;
       else if (this.buf.endsWith("_")) hold = 1;
+      else if (this.buf.endsWith("`")) hold = 1;
       else if (this.buf.endsWith("!")) hold = 1;
     }
     out += this.buf.slice(0, this.buf.length - hold);
@@ -271,8 +365,17 @@ export class StreamingMarkdownFilter {
           const content = this.inl.acc.slice(0, idx);
           this.buf = this.inl.acc.slice(idx + 3);
           this.inl = null;
-          if (StreamingMarkdownFilter.containsCJK(content)) return content;
-          return `***${content}***`;
+          return content; // 标记剥离，内容保留（微信不渲染粗体）
+        }
+        return "";
+      }
+      case "bold2": {
+        const idx = this.inl.acc.indexOf("**");
+        if (idx !== -1) {
+          const content = this.inl.acc.slice(0, idx);
+          this.buf = this.inl.acc.slice(idx + 2);
+          this.inl = null;
+          return content;
         }
         return "";
       }
@@ -282,8 +385,17 @@ export class StreamingMarkdownFilter {
           const content = this.inl.acc.slice(0, idx);
           this.buf = this.inl.acc.slice(idx + 3);
           this.inl = null;
-          if (StreamingMarkdownFilter.containsCJK(content)) return content;
-          return `___${content}___`;
+          return content;
+        }
+        return "";
+      }
+      case "ubold2": {
+        const idx = this.inl.acc.indexOf("__");
+        if (idx !== -1) {
+          const content = this.inl.acc.slice(0, idx);
+          this.buf = this.inl.acc.slice(idx + 2);
+          this.inl = null;
+          return content;
         }
         return "";
       }
@@ -304,8 +416,7 @@ export class StreamingMarkdownFilter {
             const content = this.inl.acc.slice(0, j);
             this.buf = this.inl.acc.slice(j + 1);
             this.inl = null;
-            if (StreamingMarkdownFilter.containsCJK(content)) return content;
-            return `*${content}*`;
+            return content;
           }
         }
         return "";
@@ -327,9 +438,27 @@ export class StreamingMarkdownFilter {
             const content = this.inl.acc.slice(0, j);
             this.buf = this.inl.acc.slice(j + 1);
             this.inl = null;
-            if (StreamingMarkdownFilter.containsCJK(content)) return content;
-            return `_${content}_`;
+            return content;
           }
+        }
+        return "";
+      }
+      case "code": {
+        const idx = this.inl.acc.indexOf("`");
+        if (idx !== -1) {
+          const content = this.inl.acc.slice(0, idx);
+          this.buf = this.inl.acc.slice(idx + 1);
+          this.inl = null;
+          return content; // 反引号剥离，内容保留
+        }
+        const nl = this.inl.acc.indexOf("\n");
+        if (nl !== -1) {
+          // 行内代码跨行（异常）→ 恢复反引号原样
+          const r = "`" + this.inl.acc.slice(0, nl + 1);
+          this.buf = this.inl.acc.slice(nl + 1);
+          this.inl = null;
+          this.sol = true;
+          return r;
         }
         return "";
       }
@@ -353,9 +482,5 @@ export class StreamingMarkdownFilter {
       }
     }
     return "";
-  }
-
-  private static containsCJK(text: string): boolean {
-    return /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/.test(text);
   }
 }

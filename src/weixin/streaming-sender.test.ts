@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { WeixinStreamingSender } from './streaming-sender.js'
+import { STUCK_THRESHOLD, WeixinStreamingSender } from './streaming-sender.js'
 
 /** 构造发送器：收集 sendText 发出的文本，返回 { sender, sent }。 */
 function makeSender() {
@@ -121,6 +121,57 @@ describe('WeixinStreamingSender', () => {
     const r = await sender.flush()
     expect(r.textParts).toEqual([])
     expect(sender.sent).toBe(0) // 失败不计入 sent
+  })
+
+  it(`连续失败 ${STUCK_THRESHOLD} 次 → onStuck 回调一次（发送通道兜底提示）`, async () => {
+    let stuck = 0
+    const sender = new WeixinStreamingSender(
+      async () => {
+        throw new Error('send fail')
+      },
+      () => stuck++,
+    )
+    for (let i = 0; i < STUCK_THRESHOLD + 1; i++) {
+      sender.feed(`第${i}段` + '一'.repeat(100)) // 每段触发一次 queueSend
+    }
+    await sender.flush()
+    expect(stuck).toBe(1) // 触发一次，不重复
+  })
+
+  it('发送成功打断连续失败计数：跨过阈值不误报，后续连续失败仍触发', async () => {
+    let stuck = 0
+    let fail = true
+    const sender = new WeixinStreamingSender(
+      async () => {
+        if (fail) throw new Error('send fail')
+      },
+      () => stuck++,
+    )
+    // 失败 2 次 → 成功 1 次（计数清零）→ 再失败 3 次 → 触发
+    for (let i = 0; i < 2; i++) {
+      sender.feed('一'.repeat(100))
+      await sender.flush()
+    }
+    fail = false
+    sender.feed('一'.repeat(100))
+    await sender.flush()
+    fail = true
+    for (let i = 0; i < STUCK_THRESHOLD; i++) {
+      sender.feed('一'.repeat(100))
+      await sender.flush()
+    }
+    expect(stuck).toBe(1)
+  })
+
+  it('全部发送成功 → onStuck 不触发', async () => {
+    let stuck = 0
+    const sender = new WeixinStreamingSender(
+      async () => undefined,
+      () => stuck++,
+    )
+    for (let i = 0; i < 10; i++) sender.feed('一'.repeat(100))
+    await sender.flush()
+    expect(stuck).toBe(0)
   })
 })
 

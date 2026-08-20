@@ -70,5 +70,6 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 - 流式渐进回复（回复分段实时发送，markdown 安全分片 + 标记剥离）：已完成
 - 文生图体验（generate_image 工具调用时占位回复 + 各能力 fetch 超时保护 + 工具调用耗时日志）：已完成（0.3.5）
 - 消息超时两层保护（空闲 180s 活动刷新制 + 整轮 900s 上限，`OPENCLAW_ASK_IDLE_TIMEOUT_SEC` / `OPENCLAW_ASK_TIMEOUT_SEC` 可配，超时文案区分"AI 响应超时 / 任务处理超时"）：已完成（0.3.8）
+- 回复规整（微信不渲染 markdown）：AGENTS.md 格式契约 + 常用模板 few-shot（0.4.0）；StreamingMarkdownFilter 剥离全部 markdown 语法（表格→纯文本行、粗体/斜体/行内代码/代码块/标题/分隔线/引用，内容保留）；流式发送连续失败 ≥3 次回"发送通道异常"提示（0.4.0）
 - 限制：语音条回复不支持——官方协议不渲染（Issue #78/#254 实测），`[tts:]` 文本并入文字回复
 - 注意：dsh 为 0.1.0-rc 预发布，接口可能破坏性变更

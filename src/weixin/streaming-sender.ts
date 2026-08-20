@@ -25,6 +25,9 @@ export interface FlushResult {
   textParts: string[]
 }
 
+/** 连续发送失败达到该次数时触发 onStuck（发送通道异常兜底提示）。 */
+export const STUCK_THRESHOLD = 3
+
 /** 流式回复发送器。 */
 export class WeixinStreamingSender {
   /** 待发送的普通文本累积（含不完整行）。 */
@@ -40,8 +43,16 @@ export class WeixinStreamingSender {
   /** 发送串行化链。 */
   private sendChain: Promise<void> = Promise.resolve()
   private sentCount = 0
+  /** 连续发送失败计数（成功后归零）。 */
+  private consecutiveFailures = 0
+  /** 本次会话是否已触发过兜底提示（每个 sender 实例最多一次）。 */
+  private stuckNotified = false
 
-  constructor(private readonly sendText: (text: string) => Promise<void>) {}
+  constructor(
+    private readonly sendText: (text: string) => Promise<void>,
+    /** 连续发送失败 ≥STUCK_THRESHOLD 次时回调一次——调用方给用户发通道异常提示（实测：微信服务端拒绝发送时所有分片全失败，用户静默无感知）。 */
+    private readonly onStuck?: () => void,
+  ) {}
 
   /** 已通过 queueSend 发出的文本条数（供调用方判断是否发过流式内容）。 */
   get sent(): number {
@@ -152,8 +163,14 @@ export class WeixinStreamingSender {
       try {
         await this.sendText(t)
         this.sentCount++
+        this.consecutiveFailures = 0
       } catch (err) {
+        this.consecutiveFailures++
         logger.warn(`weixin-gateway: streaming send failed: ${String(err)}`)
+        if (this.consecutiveFailures >= STUCK_THRESHOLD && !this.stuckNotified) {
+          this.stuckNotified = true
+          this.onStuck?.()
+        }
       }
     })
   }

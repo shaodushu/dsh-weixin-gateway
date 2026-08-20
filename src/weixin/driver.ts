@@ -34,7 +34,7 @@ import type { MessageItem, WeixinMessage } from './api/types.js'
 import { WeixinConfigManager } from './api/config-cache.js'
 import { sendMessageWeixin } from './send.js'
 import { sendWeixinMediaFile } from './send-media.js'
-import { WeixinStreamingSender } from './streaming-sender.js'
+import { STUCK_THRESHOLD, WeixinStreamingSender } from './streaming-sender.js'
 import {
   weixinMessageToMsgContext,
   getContextTokenFromMsgContext,
@@ -305,13 +305,25 @@ async function handleIncoming(
   logger.info(`weixin-gateway: [${account.accountId}] ${to}: ${prompt.slice(0, 120)}`)
   try {
     // 流式发送器：agent 生成 → 增量发微信（markdown 安全分片 + 标记剥离）
-    const sender = new WeixinStreamingSender(async (text) => {
-      await sendMessageWeixin({
-        to,
-        text,
-        opts: { baseUrl, token, contextToken },
-      })
-    })
+    const sender = new WeixinStreamingSender(
+      async (text) => {
+        await sendMessageWeixin({
+          to,
+          text,
+          opts: { baseUrl, token, contextToken },
+        })
+      },
+      // 连续发送失败兜底（实测：微信服务端拒绝发送时所有分片全失败、用户静默无感知，
+      // 连"服务开小差了"都发不出——至少主动提示一次通道异常）
+      () => {
+        logger.warn(`weixin-gateway: send channel stuck (${STUCK_THRESHOLD}+ consecutive failures), notifying user`)
+        void sendMessageWeixin({
+          to,
+          text: '⚠️ 消息发送通道出现异常，回复可能未送达，请稍后再试',
+          opts: { baseUrl, token, contextToken },
+        }).catch((err) => logger.error(`weixin-gateway: send stuck notice failed: ${String(err)}`))
+      },
+    )
     // "正在输入"状态：需要先向 getConfig 要 typing ticket
     const cached = await configManager.getForUser(to, contextToken)
     if (cached.typingTicket) {
