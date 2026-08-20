@@ -68,6 +68,22 @@ export class SessionRouter {
     return this.handles.size
   }
 
+  /**
+   * 关闭并移除某用户的会话句柄（per-user 模式 key=userId；room 模式 key=roomKey）。
+   * dispose 失败仅告警不抛；下次 getSession 自动重建（`/reset` 命令用）。
+   * 安全性：轮询串行处理消息，reset 发生时不存在该会话正在流式生成消息的并发窗口。
+   */
+  async reset(userId: string): Promise<void> {
+    const key = this.mode === 'room' ? this.roomKey : userId
+    const handle = this.handles.get(key)
+    if (!handle) return
+    await handle.dispose().catch((err) => {
+      logger.warn(`session-router: reset ${key} failed: ${String(err)}`)
+    })
+    this.handles.delete(key)
+    logger.info(`session-router: reset session for ${this.mode === 'room' ? 'room' : `user ${userId}`}`)
+  }
+
   /** 关闭全部会话。 */
   async disposeAll(): Promise<void> {
     for (const [key, handle] of this.handles) {

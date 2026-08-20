@@ -72,5 +72,8 @@ pnpm test        # vitest（实例互斥锁等纯逻辑，不依赖微信/网络
 - 消息超时两层保护（空闲 180s 活动刷新制 + 整轮 900s 上限，`OPENCLAW_ASK_IDLE_TIMEOUT_SEC` / `OPENCLAW_ASK_TIMEOUT_SEC` 可配，超时文案区分"AI 响应超时 / 任务处理超时"）：已完成（0.3.8）
 - 回复规整（微信不渲染 markdown）：AGENTS.md 格式契约 + 常用模板 few-shot（0.4.0）；StreamingMarkdownFilter 剥离全部 markdown 语法（表格→纯文本行、粗体/斜体/行内代码/代码块/标题/分隔线/引用，内容保留）；流式发送连续失败 ≥3 次回"发送通道异常"提示（0.4.0）
 - 流式单词截断保护（0.4.1）：不完整拉丁单词（如 "km" 等待 "/h"）留在缓存不发出，防止 "km/h" 被阈值劈开
+- 扫码登录后清理同用户旧账号（0.4.3）：本地索引仅保留最新账号，防网关误连过期账号空转
+- 定时主动推送（0.5.0）：`dsh-weixin push`（CLI 独立进程，读盘 context token 发送）+ `dsh-weixin cron add/list/rm`（cron 表达式自实现，daemon 内 30s tick 调度，10 分钟宽限窗口错过跳过）。模块：`cron-expr.ts`（解析+nextRunAt）、`cron-jobs.ts`（任务持久化+到期判定）、`cron-scheduler.ts`（调度器）、`push.ts`（推送数据链）。context-token 持久化函数（inbound.ts `setContextToken`/`restoreContextTokens`/`readPersistedContextTokens`）在本版接线
+- 微信内斜杠命令（0.5.0）：`/help` `/reset` `/status` `/cron list`（`slash-command.ts`），授权走 `WECHAT_ADMIN_IDS`（.env）；未命中命令表放行给 agent
 - 限制：语音条回复不支持——官方协议不渲染（Issue #78/#254 实测），`[tts:]` 文本并入文字回复
 - 注意：dsh 为 0.1.0-rc 预发布，接口可能破坏性变更

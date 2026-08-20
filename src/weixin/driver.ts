@@ -39,6 +39,8 @@ import { STUCK_THRESHOLD, WeixinStreamingSender } from './streaming-sender.js'
 import {
   weixinMessageToMsgContext,
   getContextTokenFromMsgContext,
+  restoreContextTokens,
+  setContextToken,
 } from './inbound.js'
 import { downloadMediaFromItem } from './media/media-download.js'
 import { saveMediaBuffer } from './media-store.js'
@@ -46,6 +48,13 @@ import { logger } from './util/logger.js'
 import { createGatewayAgent, askAgentStreaming } from '../bridge.js'
 import { SessionRouter } from './session-router.js'
 import type { SessionMode } from './session-router.js'
+import { CronScheduler } from './cron-scheduler.js'
+import {
+  handleSlashMessage,
+  isSlashCommandAuthorized,
+  parseSlashCommand,
+  resolveAdminUserIds,
+} from './slash-command.js'
 
 /** 微信账号状态目录（本地，与 OpenClaw 隔离）。 */
 const WEIXIN_STATE_DIR = path.join(resolveStateDir(), 'weixin-dsh')
@@ -181,6 +190,13 @@ export async function runWeixinGateway(
     (msg) => logger.debug(msg),
   )
 
+  // 定时任务调度：恢复盘上 context token + 起 tick 循环。
+  // 跑在持有 run-lock 的网关进程内（gateway.ts acquireRunLock 之后），
+  // 互斥锁天然保证同一账号只有一份调度器。
+  restoreContextTokens(accountId)
+  const scheduler = new CronScheduler({ router, accountId, baseUrl, token })
+  scheduler.start()
+
   let getUpdatesBuf = ''
   let sessionTimeoutCount = 0
   logger.info(`weixin-gateway: polling started for ${accountId}`)
@@ -220,7 +236,7 @@ export async function runWeixinGateway(
         if (!userId) continue
         // 按用户路由会话（per-user 独立 / room 共享）
         const handle = await router.getSession(userId)
-        await handleIncoming(ctx, handle, account, msg, baseUrl, token, configManager)
+        await handleIncoming(ctx, handle, account, msg, baseUrl, token, configManager, router, sessionMode)
       }
     } catch (err) {
       if (abortSignal?.aborted) break
@@ -230,6 +246,7 @@ export async function runWeixinGateway(
     }
   }
 
+  scheduler.stop()
   await router.disposeAll()
   logger.info(`weixin-gateway: stopped for ${accountId} (${router.size} sessions)`)
 }
@@ -243,9 +260,14 @@ async function handleIncoming(
   baseUrl: string,
   token: string | undefined,
   configManager: WeixinConfigManager,
+  router: SessionRouter,
+  sessionMode: SessionMode,
 ): Promise<void> {
   const to = msg.from_user_id ?? ''
   const contextToken = msg.context_token
+  // 持久化 context token：主动推送（cron / CLI push）的数据链地基——
+  // 不入盘则 context-tokens.json 永远为空，独立进程拿不到发送凭证
+  if (contextToken) setContextToken(account.accountId, to, contextToken)
 
   // 媒体下载：mainMediaItem 选取（与原版 process-message 一致）
   const mainMediaItem = pickMediaItem(msg)
@@ -267,6 +289,33 @@ async function handleIncoming(
 
   const msgCtx = weixinMessageToMsgContext(msg, account.accountId, mediaOpts)
   const text = msgCtx.Body.trim()
+
+  // 斜杠命令：纯文本且以 / 开头才尝试本地命令；媒体消息（voice/pic 等）即使带 / 也走正常流程。
+  // 未命中命令表的消息（如 "/tmp 目录"）由 handleSlashMessage 返回 false → 放行给 agent。
+  if (!mainMediaItem && text.startsWith('/')) {
+    const adminUserIds = resolveAdminUserIds()
+    msgCtx.CommandBody = text
+    msgCtx.CommandAuthorized = isSlashCommandAuthorized(
+      parseSlashCommand(text) ?? { name: '', args: [] },
+      { userId: to, adminUserIds, sessionMode },
+    )
+    const consumed = await handleSlashMessage(
+      {
+        accountId: account.accountId,
+        sessionMode,
+        router,
+        send: async (reply) => {
+          await sendMessageWeixin({
+            to,
+            text: reply,
+            opts: { baseUrl, token, contextToken },
+          })
+        },
+      },
+      { text, userId: to },
+    )
+    if (consumed) return // 已被命令消费（含"命令执行失败"回复），不再走 agent
+  }
 
   // 注入 agent 的文本：文本消息用原文；媒体消息附 AI 解析结果或路径
   let prompt: string

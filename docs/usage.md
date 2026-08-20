@@ -168,6 +168,49 @@ dsh-weixin run
 
 命令行：`--session-mode per-user|room`（与 `--weixin-run` 同用）。会话跨进程/重启自动恢复（dsh-base 内置 JSONL 后端，`~/.dsh/sessions/`）。
 
+## 定时推送（push / cron）
+
+网关支持**主动发消息**（0.5.0+），不再只能被动回复：
+
+```bash
+# 一次性主动发送（需对方先给机器人发过消息，已建立会话）
+dsh-weixin push --to <userId> "提醒：下午 3 点开会"
+dsh-weixin push --to all "系统维护完成通知"        # 发给所有活跃会话用户
+
+# 定时任务（由常驻网关调度执行；内容为位置参数，type 缺省 text）
+dsh-weixin cron add "早上好 ☀️" --cron "30 8 * * *" --to <userId>               # 每天 08:30 发静态文本
+dsh-weixin cron add "查今天天气并摘要" --cron "0 9 * * 1" --to <userId> --type prompt  # 每周一 09:00 走 agent 生成
+dsh-weixin cron list                 # 查看任务与下次执行时间
+dsh-weixin cron rm <任务id>          # 删除任务
+```
+
+- **cron 表达式**：5 字段（分 时 日 月 周），支持 `*` / 数字 / `*/步长`，如 `*/5 * * * *`（每 5 分钟）。基于本机时区。
+- **内容形态**：`--type text`（默认）静态文字直接发送；`--type prompt` 到时走 agent 生成内容再发送（生成结果发给 `--to` 指定用户；**不支持 `--to all`**）。
+- **执行时机**：任务在网关进程内调度（`dsh-weixin start` 守护或 `run` 前台均可）。**错过触发点（网关停机期间）不补发**；宽限 10 分钟内仍会发（容忍守护短暂重启）。
+- **前提**：用户先给机器人发过一条消息（context token 落盘），推送才能带上会话凭证；未建立会话的用户收不到主动消息（`--to all` 只发给活跃用户）。
+- **已知限制（v1）**：prompt 型任务会占用收件人的会话上下文（任务提示词进入对话历史，`/reset` 可清）；`cron add` 与守护的并发写文件未加锁（单用户场景足够）。
+
+## 微信内斜杠命令
+
+在微信里直接发 `/` 开头的命令管理机器人（0.5.0+），无需 SSH：
+
+| 命令 | 权限 | 说明 |
+|---|---|---|
+| `/help` | 所有人 | 列出可用命令 |
+| `/reset` | 自己（room 模式需管理员） | 重置会话上下文（per-user 模式重置自己的，room 模式重置共享会话） |
+| `/status` | 管理员 | 网关账号 / 会话模式 / 活跃会话数 |
+| `/cron list` | 管理员 | 定时任务列表（同 `dsh-weixin cron list`） |
+
+**管理员配置**：在 `~/.openclaw/weixin-dsh/.env` 加一行（逗号分隔多个）：
+
+```bash
+WECHAT_ADMIN_IDS=你的微信userId,另一个userId
+```
+
+- 不知道自己的 userId？给机器人发一条消息后，查看日志 `$TMPDIR/openclaw-YYYY-MM-DD.log` 里 `[账号] userId:` 开头的行。
+- 修改后需**重启守护**生效（launchd 启动时读 .env）。
+- 未命中命令表的消息（如 `/tmp 目录在哪`）会正常交给 AI 处理，不会误伤。
+
 ## 依赖与凭据位置
 
 - dsh 环境：`@deepseek-ai/dsh`（launcher）+ `~/.dsh/profiles/headless`（profile）

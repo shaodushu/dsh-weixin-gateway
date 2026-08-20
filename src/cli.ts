@@ -50,11 +50,19 @@ import {
   writeSettingsFile,
 } from './weixin/dialog-config.js'
 import type { DialogModelQuestions } from './weixin/dialog-config.js'
+import {
+  addCronJob,
+  formatCronJobList,
+  loadCronJobs,
+  nextRunAtOf,
+  removeCronJob,
+} from './weixin/cron-jobs.js'
+import { pushMessage } from './weixin/push.js'
 
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.4.3'
+const VERSION = '0.5.0'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -535,5 +543,71 @@ program
     const code = await login(accountId)
     process.exit(code)
   })
+
+program
+  .command('push')
+  .description('一次性主动发送消息给微信用户（需对方先给机器人发过消息以建立会话）')
+  .argument('<text>', '发送内容')
+  .requiredOption('--to <userId|all>', '目标 userId 或 all（最新账号下所有活跃会话用户）')
+  .option('--account <accountId>', '账号 id（缺省最新登录账号）')
+  .action(async (text: string, opts: { to: string; account?: string }) => {
+    try {
+      const result = await pushMessage({ accountId: opts.account, to: opts.to, text })
+      console.log(`✅ 推送完成：成功 ${result.sent} 条，失败 ${result.failed} 条`)
+      if (result.failed > 0) process.exit(1)
+    } catch (err) {
+      console.error(`[dsh-weixin] push 失败: ${err instanceof Error ? err.message : String(err)}`)
+      process.exit(1)
+    }
+  })
+
+program
+  .command('cron')
+  .description('定时任务管理（由常驻网关调度执行，`dsh-weixin start`/`run` 运行时生效）')
+  .addCommand(
+    new Command('add')
+      .description('新增定时任务（text 静态内容直接发；prompt 到时走 agent 生成再发）')
+      .argument('<content>', 'text 内容或 prompt 提示词')
+      .requiredOption('--cron <expr>', '5 字段 cron 表达式（分 时 日 月 周，支持 * / 数字 / */步长）')
+      .option('--type <text|prompt>', '任务类型', 'text')
+      .requiredOption('--to <userId|all>', '目标 userId 或 all（最新账号活跃会话用户）')
+      .option('--account <accountId>', '归属账号（缺省为执行时的网关账号）')
+      .action(async (content: string, opts: { cron: string; type: string; to: string; account?: string }) => {
+        try {
+          const job = addCronJob({
+            cron: opts.cron,
+            content,
+            type: opts.type as 'text' | 'prompt',
+            to: opts.to,
+            accountId: opts.account,
+          })
+          const next = nextRunAtOf(job)
+          console.log(`✅ 已添加任务 ${job.id}`)
+          console.log(`   下次执行: ${next ? next.toISOString() : '永不（cron 表达式永不匹配）'}`)
+        } catch (err) {
+          console.error(`[dsh-weixin] 添加任务失败: ${err instanceof Error ? err.message : String(err)}`)
+          process.exit(1)
+        }
+      }),
+  )
+  .addCommand(
+    new Command('list')
+      .description('列出定时任务')
+      .action(() => {
+        console.log(formatCronJobList(loadCronJobs()))
+      }),
+  )
+  .addCommand(
+    new Command('rm')
+      .description('删除定时任务')
+      .argument('<id>', '任务 id（cron list 查看）')
+      .action((id: string) => {
+        if (!removeCronJob(id)) {
+          console.error(`[dsh-weixin] 未找到任务 ${id}`)
+          process.exit(1)
+        }
+        console.log(`🗑  已删除任务 ${id}`)
+      }),
+  )
 
 program.parse()

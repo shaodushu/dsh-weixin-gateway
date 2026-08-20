@@ -55,26 +55,34 @@ function persistContextTokens(accountId: string): void {
 }
 
 /**
+ * 直接读盘（不经内存 store）：<stateDir>/openclaw-weixin/accounts/{accountId}.context-tokens.json
+ * → Record<userId, token>；文件缺失/损坏 → {}。独立 CLI push 与 'all' 广播枚举共用。
+ */
+export function readPersistedContextTokens(accountId: string): Record<string, string> {
+  const filePath = resolveContextTokenFilePath(accountId);
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const tokens = JSON.parse(raw) as Record<string, string>;
+    if (typeof tokens !== "object" || tokens === null) return {};
+    return Object.fromEntries(
+      Object.entries(tokens).filter(([, v]) => typeof v === "string" && v),
+    ) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Restore persisted context tokens for an account into the in-memory map.
  * Called once during gateway startAccount to survive restarts.
  */
 export function restoreContextTokens(accountId: string): void {
-  const filePath = resolveContextTokenFilePath(accountId);
-  try {
-    if (!fs.existsSync(filePath)) return;
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const tokens = JSON.parse(raw) as Record<string, string>;
-    let count = 0;
-    for (const [userId, token] of Object.entries(tokens)) {
-      if (typeof token === "string" && token) {
-        contextTokenStore.set(contextTokenKey(accountId, userId), token);
-        count++;
-      }
-    }
-    logger.info(`restoreContextTokens: restored ${count} tokens for account=${accountId}`);
-  } catch (err) {
-    logger.warn(`restoreContextTokens: failed to read ${filePath}: ${String(err)}`);
+  const tokens = readPersistedContextTokens(accountId);
+  for (const [userId, token] of Object.entries(tokens)) {
+    contextTokenStore.set(contextTokenKey(accountId, userId), token);
   }
+  const count = Object.keys(tokens).length;
+  logger.info(`restoreContextTokens: restored ${count} tokens for account=${accountId}`);
 }
 
 /** Remove all context tokens for a given account (memory + disk). */

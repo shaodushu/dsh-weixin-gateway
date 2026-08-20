@@ -56,6 +56,8 @@ pnpm test                              # 单元测试（35 用例）
 - **-14 session timeout**：`getUpdates` 长轮询既是拉消息也是**保活心跳**；登录进程退出后 session 被服务端回收。修复：登录成功后**同一进程立即接轮询**。
 - **实例互斥**：同一账号同时只能一个网关实例（`dsh-weixin run` 遇冲突自动拦截；`dsh-weixin login` 会停 daemon 让路，登录结束自动交回）。
 - **启用 ClawBot 插件**（最容易漏）：微信 → 我 → 设置 → 插件 → 启用 ClawBot；否则网关在跑但收不到任何消息。
+- **主动推送 + 定时任务（0.5.0+）**：`dsh-weixin push --to xxx "内容"` 一次性主动发送；`dsh-weixin cron add "30 8 * * *" --to xxx --text "..."` 定时推送（daemon 内调度，错过不补发）。
+- **微信内斜杠命令（0.5.0+）**：发 `/help` `/reset` `/status` `/cron list` 管理机器人；管理员在 `~/.openclaw/weixin-dsh/.env` 配 `WECHAT_ADMIN_IDS`。
 
 更多症状排查与实测踩坑见 **[排障记录 →](docs/troubleshooting.md)**。
 
