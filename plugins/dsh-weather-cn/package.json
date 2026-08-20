@@ -1,7 +1,7 @@
 {
   "name": "dsh-weather-cn",
-  "version": "0.1.1",
-  "description": "Weather tool for DeepSeek Harness via Open-Meteo (free, no API key). CN fork: 中文地名直接用（geocoding 带 language=zh）。",
+  "version": "0.1.2",
+  "description": "Weather tool for DeepSeek Harness via Open-Meteo (free, no API key). CN fork: 中文地名直接用（geocoding 带 language=zh）。（0.1.2：dsh-tools 改 optional peer ^0.1.0-rc.6，修复与 dsh 全局实例的 Symbol 分裂导致工具执行崩溃）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -33,8 +33,6 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "devDependencies": {
@@ -43,6 +41,18 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
     }
   }
 }
