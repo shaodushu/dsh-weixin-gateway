@@ -5,8 +5,11 @@
  *  - per-user：每个微信用户一个独立 agent 会话（互不干扰，多用户隔离）
  *  - room：所有用户共享同一个 agent 会话（统一房间，上下文互通）
  *
- * 注意：当前 dsh headless profile 无会话持久化后端（sessionPersistence），
- * 会话仅存于进程内存，网关重启后会话丢失。
+ * 注意：会话持久化已生效——headless profile 装配了 dsh-session-persistence-jsonl
+ * （~/.dsh/sessions/<projectKey>/<sessionId>/session.jsonl.zstd），getSession 按
+ * 稳定 id（room key / userId）resume、按 id 跨根定位，网关重启后上下文延续
+ * （实测 2026-08-20：daemon 重启后日志 "resumed persisted session for room"）。
+ * resume 失败（后端不可用/会话不存在）时回退新建。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentHandle } from '@deepseek-ai/dsh-agent'
