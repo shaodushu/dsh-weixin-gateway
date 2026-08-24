@@ -1,0 +1,27 @@
+{
+  "name": "dsh-room-projection-sync",
+  "version": "0.0.1",
+  "description": "dsh web 客户端插件：定时强制刷新 __room__ 会话的投影缓存（coldSnapshot 读文件增量），让 web 端实时显示微信网关写入的新消息（跨进程共享会话的投影滞后修复）",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "web",
+    "session",
+    "projection"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.6"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

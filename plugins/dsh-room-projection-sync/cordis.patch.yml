@@ -1,0 +1,5 @@
+# dsh-room-projection-sync bundle patch: inserts the projection-sync plugin.
+
+- insert:
+    - id: dsh-room-projection-sync
+      name: "dsh-room-projection-sync"
