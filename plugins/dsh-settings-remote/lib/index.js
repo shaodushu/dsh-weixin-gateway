@@ -20,13 +20,18 @@ export const inject = ["webServer", "apiProxy", "loader", "webRuntime"];
 
 const DEFAULT_MAX_REQUEST_BODY_BYTES = 167772160;
 
-/** settings.* 配置平面（非 loopback 放行的特权方法；与 dsh-client-connection 的 PRIVILEGED_METHODS 对应）。 */
+/** 配置平面（非 loopback 放行的特权方法；与 dsh-client-connection 的 PRIVILEGED_METHODS 对应）。
+ * settings.*：模型/提供方目录页的配置读写；credentials.*：模型页添加模型的 API key 保存（set）、
+ * 密钥配置状态探测（describe）、删除（unset）。全部有 dsh-auth-gate 登录层保护。 */
 const SETTINGS_METHODS = [
   "settings.describe",
   "settings.update",
   "settings.replace",
   "settings.mutate",
   "settings.openDocument",
+  "credentials.set",
+  "credentials.describe",
+  "credentials.unset",
 ];
 
 /** 复刻 dsh-client-connection 的 isLoopbackHostname。 */

@@ -1,6 +1,6 @@
 {
   "name": "dsh-settings-remote",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "dsh web 客户端插件：settings.* 配置平面（describe/update/replace/mutate/openDocument）在非 loopback 页面也可读可写——修复经域名反向代理访问时，模型/提供方目录页报 “settings are unavailable in this browser” 与 “/api/settings.mutate: HTTP 403”",
   "type": "module",
   "main": "lib/index.js",
