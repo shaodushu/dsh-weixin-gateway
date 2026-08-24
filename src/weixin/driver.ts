@@ -360,7 +360,13 @@ async function handleIncoming(
   }
 
   logger.info(`weixin-gateway: [${account.accountId}] ${to}: ${prompt.slice(0, 120)}`)
+  // 聚合占位保底状态：try 外声明，成功/失败路径都要清理定时器
+  let progressSent = false
+  let progressTimer: ReturnType<typeof setTimeout> | undefined
   try {
+    // 回复模式：aggregate（默认）= 生成期间累积、"正在输入"，完成后统一发送
+    // （防碎片 + 防同 context 高频连发被拒 ret=-2）；stream = 80 字符阈值增量发送。
+    const replyMode = (process.env.DSH_WEIXIN_REPLY_MODE ?? 'aggregate') as 'stream' | 'aggregate'
     // 流式发送器：agent 生成 → 增量发微信（markdown 安全分片 + 标记剥离）
     const sender = new WeixinStreamingSender(
       async (text) => {
@@ -371,15 +377,22 @@ async function handleIncoming(
         })
       },
       // 连续发送失败兜底（实测：微信服务端拒绝发送时所有分片全失败、用户静默无感知，
-      // 连"服务开小差了"都发不出——至少主动提示一次通道异常）
-      () => {
-        logger.warn(`weixin-gateway: send channel stuck (${STUCK_THRESHOLD}+ consecutive failures), notifying user`)
+      // 连"服务开小差了"都发不出——至少主动提示一次通道异常）。
+      // reason=context：会话级失效（prepare failed/裸 -2），重发无效，须用户
+      // 先给机器人发一条消息刷新 context（或重新扫码）——提示文案不同。
+      (reason) => {
+        logger.warn(`weixin-gateway: send channel stuck (${STUCK_THRESHOLD}+ consecutive failures, reason=${reason}), notifying user`)
+        const notice =
+          reason === 'context'
+            ? '⚠️ 消息发送通道异常（会话已失效）：请先给机器人发一条消息刷新会话，稍后再试'
+            : '⚠️ 消息发送通道出现异常，回复可能未送达，请稍后再试'
         void sendMessageWeixin({
           to,
-          text: '⚠️ 消息发送通道出现异常，回复可能未送达，请稍后再试',
+          text: notice,
           opts: { baseUrl, token, contextToken },
         }).catch((err) => logger.error(`weixin-gateway: send stuck notice failed: ${String(err)}`))
       },
+      { mode: replyMode },
     )
     // "正在输入"状态：需要先向 getConfig 要 typing ticket
     const cached = await configManager.getForUser(to, contextToken)
@@ -390,6 +403,18 @@ async function handleIncoming(
         body: { ilink_user_id: to, typing_ticket: cached.typingTicket, status: 1 },
       }).catch(() => undefined)
     }
+
+    // 聚合占位保底：聚合模式下生成期用户只见 typing——超过 25s 无完成发一次
+    // 占位提示（最多一次；文生图工具调用已发过专用占位则跳过）。
+    progressTimer = setTimeout(() => {
+      if (replyMode !== 'aggregate' || progressSent) return
+      progressSent = true
+      void sendMessageWeixin({
+        to,
+        text: '还在生成，请稍候～',
+        opts: { baseUrl, token, contextToken },
+      }).catch((err) => logger.error(`weixin-gateway: send progress notice failed: ${String(err)}`))
+    }, 25_000)
 
     const result = await askAgentStreaming(agentHandle, prompt, {
       onDelta: (delta) => {
@@ -402,6 +427,7 @@ async function handleIncoming(
         if (name === 'generate_image') {
           // 文生图实测 ~60s（波动可达 2 分钟+），且生成期间无文本增量：
           // 立即发占位回复，避免用户无反馈干等
+          progressSent = true // 聚合占位定时器不再重复发
           void sendMessageWeixin({
             to,
             text: '好的，正在生成图片，大概需要 1 分钟左右，请稍候～',
@@ -410,6 +436,7 @@ async function handleIncoming(
         }
       },
     })
+    clearTimeout(progressTimer)
     if (result.error !== undefined) {
       await sendMessageWeixin({
         to,
@@ -452,6 +479,7 @@ async function handleIncoming(
       logger.info(`weixin-gateway: replied to ${to} (${textReply.length} chars)`)
     }
   } catch (err) {
+    if (progressTimer) clearTimeout(progressTimer)
     logger.error(`weixin-gateway: handle message error: ${String(err)}`)
     await sendMessageWeixin({
       to,

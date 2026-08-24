@@ -1,0 +1,628 @@
+<title>微信回复整合</title>
+<style>
+  :root {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --surface-2: #eef0ec;
+    --ink: #1b1e22;
+    --ink-2: #5c636b;
+    --ink-3: #8a9198;
+    --line: #dde0da;
+    --accent: #07a35a;
+    --accent-ink: #056b3c;
+    --accent-soft: #e2f4ea;
+    --warn: #b45309;
+    --warn-soft: #fdf0dc;
+    --bad: #c0392b;
+    --bad-soft: #fbeae8;
+    --code: #2b3038;
+    --code-ink: #e8eaed;
+    --shadow: 0 1px 2px rgba(20, 24, 20, 0.05), 0 4px 16px rgba(20, 24, 20, 0.06);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181b;
+      --surface: #1e2125;
+      --surface-2: #262a2f;
+      --ink: #ecedee;
+      --ink-2: #a6adb5;
+      --ink-3: #757d86;
+      --line: #33383e;
+      --accent: #2bdd7f;
+      --accent-ink: #7ce8b4;
+      --accent-soft: #123524;
+      --warn: #e2a93b;
+      --warn-soft: #33270f;
+      --bad: #ef6a5e;
+      --bad-soft: #3a1d1b;
+      --code: #0f1113;
+      --code-ink: #d6d9dd;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181b;
+    --surface: #1e2125;
+    --surface-2: #262a2f;
+    --ink: #ecedee;
+    --ink-2: #a6adb5;
+    --ink-3: #757d86;
+    --line: #33383e;
+    --accent: #2bdd7f;
+    --accent-ink: #7ce8b4;
+    --accent-soft: #123524;
+    --warn: #e2a93b;
+    --warn-soft: #33270f;
+    --bad: #ef6a5e;
+    --bad-soft: #3a1d1b;
+    --code: #0f1113;
+    --code-ink: #d6d9dd;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15.5px;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 8px 0 40px; }
+  .kicker {
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: 34px;
+    line-height: 1.25;
+    font-weight: 800;
+    margin: 0 0 16px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .lede {
+    font-size: 16.5px;
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 0 0 28px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .stat b {
+    display: block;
+    font-size: 26px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent-ink);
+    letter-spacing: -0.02em;
+  }
+  .stat .unit { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .stat span.tip { font-size: 12.5px; color: var(--ink-3); display: block; margin-top: 2px; }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 52px; }
+  h2 {
+    font-size: 21px;
+    font-weight: 800;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .sec-sub { color: var(--ink-2); font-size: 14px; margin: 0 0 20px; }
+  h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 28px 0 10px;
+  }
+
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1px 5px;
+  }
+  .mono { font-variant-numeric: tabular-nums; }
+
+  /* ---------- flow diagram ---------- */
+  .flow {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 22px 24px;
+  }
+  .flow-row {
+    display: grid;
+    grid-template-columns: 148px 1fr;
+    gap: 14px;
+    padding: 9px 0;
+    border-top: 1px dashed var(--line);
+  }
+  .flow-row:first-child { border-top: none; padding-top: 0; }
+  .flow-row:last-child { padding-bottom: 0; }
+  .flow .tag {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-2);
+    letter-spacing: 0.05em;
+    padding-top: 3px;
+  }
+  .flow .tag em { font-style: normal; color: var(--accent-ink); }
+  .flow .desc { font-size: 14px; color: var(--ink); }
+  .flow .desc small { display: block; color: var(--ink-3); font-size: 12.5px; margin-top: 2px; }
+
+  /* ---------- root cause cards ---------- */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 18px 0 6px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px 18px 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .card .num {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--accent-ink);
+    letter-spacing: 0.1em;
+  }
+  .card h3 { margin: 0; font-size: 15.5px; }
+  .card p { margin: 0; font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
+  .card .ev {
+    font-size: 12px;
+    color: var(--ink-3);
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+    margin-top: auto;
+  }
+
+  /* ---------- tables ---------- */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.8px; min-width: 640px; }
+  th {
+    text-align: left;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 700;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td b { font-weight: 700; }
+  td .mono { font-size: 12.8px; }
+  tr.hl td { background: var(--accent-soft); }
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 700;
+    border-radius: 99px;
+    padding: 1px 9px;
+    white-space: nowrap;
+  }
+  .pill.ok { background: var(--accent-soft); color: var(--accent-ink); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.mid { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+
+  /* ---------- bubble comparison ---------- */
+  .bubbles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 18px 0; }
+  .bubble-panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px;
+  }
+  .bubble-panel h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .bubble-panel .cap { font-size: 12.5px; color: var(--ink-3); margin-bottom: 14px; }
+  .chat { display: flex; flex-direction: column; gap: 8px; }
+  .bubble {
+    max-width: 92%;
+    align-self: flex-start;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 12px 12px 12px 3px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .bubble.user { align-self: flex-end; background: var(--accent-soft); border-color: transparent; border-radius: 12px 12px 3px 12px; color: var(--ink); }
+  .bubble.dim { opacity: 0.5; }
+  .bubble .meta { display: block; font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
+  .bubble.sys { background: transparent; border-style: dashed; text-align: center; color: var(--ink-3); font-size: 12px; }
+  .bubble.frag { padding: 7px 11px; }
+  .bubble.frag::before { content: "…"; color: var(--ink-3); }
+  .bubble.miss {
+    border-color: var(--bad);
+    color: var(--bad);
+    background: var(--bad-soft);
+  }
+  .bubble.big { padding: 11px 14px; font-size: 13.5px; }
+  .missing-line { color: var(--bad); font-size: 12px; margin-top: 8px; }
+  .missing-line code { color: var(--bad); border-color: var(--bad-soft); background: var(--bad-soft); }
+
+  /* ---------- option rows ---------- */
+  .option {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .option .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .option .name { font-size: 16px; font-weight: 800; }
+  .option .verdict { margin-left: auto; }
+  .option p { font-size: 14px; color: var(--ink-2); margin: 6px 0 10px; }
+  .option ul { font-size: 13.5px; margin-bottom: 0; }
+  .option .cons { font-size: 13.5px; margin-top: 8px; }
+  .option .cons b { color: var(--warn); }
+
+  /* ---------- roadmap ---------- */
+  .roadmap { display: flex; flex-direction: column; gap: 0; margin: 18px 0 4px; }
+  .step { display: grid; grid-template-columns: 84px 1fr; gap: 16px; padding: 16px 0; border-top: 1px solid var(--line); }
+  .step:first-child { border-top: none; }
+  .step .stage {
+    font-size: 12.5px;
+    font-weight: 800;
+    color: var(--accent-ink);
+    letter-spacing: 0.06em;
+    padding-top: 3px;
+  }
+  .step .body h3 { margin: 0 0 6px; font-size: 15.5px; }
+  .step .body p { margin: 0 0 8px; font-size: 14px; color: var(--ink-2); }
+  .step .body ul { font-size: 13.5px; margin-bottom: 0; }
+  .step .files {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin-top: 8px;
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+
+  /* ---------- footer ---------- */
+  .footer {
+    margin-top: 64px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-3);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 760px) {
+    .stats, .cards, .bubbles { grid-template-columns: 1fr; }
+    h1 { font-size: 27px; }
+    .flow-row { grid-template-columns: 1fr; gap: 4px; }
+    .step { grid-template-columns: 1fr; gap: 6px; }
+    .wrap { padding: 40px 18px 72px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker">微信网关回复链路调研</p>
+    <h1>微信回复与模型回复,如何合并成一条可读的消息</h1>
+    <p class="lede">现状:模型生成一段完整回复,微信侧却收到一堆碎片——部分片段还可能被服务端拒绝,读起来像被"截断"。本文梳理发送链路、确认协议约束,给出聚合发送与可靠性方案。</p>
+    <div class="stats">
+      <div class="stat">
+        <b>80 <span class="unit">字符</span></b>
+        <span class="tip">流式发送阈值(硬编码)——一次 500 字回复被切成 6–8 条</span>
+      </div>
+      <div class="stat">
+        <b>≈2048 <span class="unit">字符</span></b>
+        <span class="tip">微信个人号单条文本上限,超限报错拒绝、不静默截断</span>
+      </div>
+      <div class="stat">
+        <b>ret=-2</b>
+        <span class="tip">同 context 高频连发被服务端拒绝——尾部片段丢失 = 用户看到的"截断"</span>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <h2>现状:两条链路如何拼成一条对话</h2>
+    <p class="sec-sub">模型侧聚合是完整的(会话文件实测:天气回复一字不差落盘),问题全部出在"模型输出 → 微信消息"这一段。</p>
+    <div class="flow">
+      <div class="flow-row">
+        <div class="tag">收消息</div>
+        <div class="desc">getUpdates 长轮询 → <code>handleIncoming</code>(driver.ts:255)注入 dsh agent 会话</div>
+      </div>
+      <div class="flow-row">
+        <div class="tag">模型生成</div>
+        <div class="desc"><code>askAgentStreaming</code>(bridge.ts:210)订阅 session/event,<code>applyStreamChunk</code> 提取文本增量(text-delta 为主,block-end 兜底)<small>工具调用后的最终文本块无 text-delta,只有 block-end 聚合文本——已有兜底</small></div>
+      </div>
+      <div class="flow-row">
+        <div class="tag">分段发送</div>
+        <div class="desc"><code>WeixinStreamingSender.feed</code>(streaming-sender.ts:63):markdown 剥离 → 缓存累积 → <em>≥80 字符即发一条</em>;末尾不完整单词/标记行留缓存<small>0.4.1 单词截断保护:防 "km/h" 被劈开,但切分位置仍不是语义段落</small></div>
+      </div>
+      <div class="flow-row">
+        <div class="tag">收尾</div>
+        <div class="desc"><code>flush()</code>:剩余文本按行拆成 textParts,调用方再发一条;媒体标记 <code>[image:]</code> 单独上传发送</div>
+      </div>
+      <div class="flow-row">
+        <div class="tag">穿插消息</div>
+        <div class="desc">"正在输入"状态、工具调用卡片(TOOL_CALL_START/RESULT,默认开启)、文生图占位"正在生成图片"——与文本流交错,进一步打碎阅读流</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>三个根因:"截断"从哪来</h2>
+    <p class="sec-sub">可读性低不是单一原因,是三个机制叠加的结果。</p>
+    <div class="cards">
+      <div class="card">
+        <div class="num">01</div>
+        <h3>碎片化</h3>
+        <p>80 字符阈值把一段完整回复切成 6–8 条独立消息,切分位置按换行/单词边界,不按语义段落。微信里看到的是断续的小气泡,结论被拦腰打断。</p>
+        <div class="ev">证据:streaming-sender.ts:42 threshold=80 硬编码</div>
+      </div>
+      <div class="card">
+        <div class="num">02</div>
+        <h3>高频连发被拒 → 真截断</h3>
+        <p>所有分片复用同一个 context_token 连续发送,服务端对高频复用有限制(腾讯 issue #81:同一 context 连续发多条,后面被拒)。尾部片段丢失,用户看到的回复就是残缺的——且失败 3 次后只有一条兜底提示,不补发。</p>
+        <div class="ev">证据:8/21 日志 2297 个 delta 全挂 ret=-2 prepare failed</div>
+      </div>
+      <div class="card">
+        <div class="num">03</div>
+        <h3>呈现层打断</h3>
+        <p>占位消息("正在生成图片")、工具卡片、typing 状态与文本交错。图片生成占位发出后,正式回复又以多条碎片抵达,微信里一条对话像三场对话。</p>
+        <div class="ev">证据:driver.ts:404 占位 + reply-progress 卡片默认开启</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>微信协议约束(调研确认)</h2>
+    <p class="sec-sub">方案必须在这些约束内设计——尤其"编辑已发消息"不可用,决定了不能"先流式、后合并"。</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>约束</th><th>数值 / 行为</th><th>来源与备注</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>单条文本上限</b></td>
+            <td>约 <b>2048 字符</b></td>
+            <td>社区实测值(非官方文档);超限是<b>报错拒绝</b>,不是静默截断。与企业微信"2048 字节"易混淆</td>
+          </tr>
+          <tr>
+            <td><b>ret=-2 语义</b></td>
+            <td><code>rate limited</code> = 真限流;<code>prepare failed</code> = 消息构造/context 失败;裸 <code>-2</code> = context 过期</td>
+            <td>腾讯 openclaw issue #81/#142。区分处理才有意义——token 失效时重试只会持续失败</td>
+          </tr>
+          <tr>
+            <td><b>context_token 配额</b></td>
+            <td>约 24h 无用户主动消息即冻结,主动推送全失败</td>
+            <td>腾讯云社区:每用户每 24h 至少一条入站消息续期。网关 8/21 的 prepare failed 即此症状</td>
+          </tr>
+          <tr>
+            <td><b>发送频率</b></td>
+            <td>安全 ≈ ≤8 条/分钟;12+ 条/分钟开始失败</td>
+            <td>Hermes 防封号经验值(非官方)。当前代码串行发送、无间隔,无退避</td>
+          </tr>
+          <tr>
+            <td><b>消息编辑 / 撤回</b></td>
+            <td><b>不支持</b>。iLink 协议无 update/revoke 端点</td>
+            <td>决定性约束:发出即定型,只能发新消息。message_state 是接收侧字段</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>同行开源经验</h2>
+    <p class="sec-sub">四路调研:上游官方 openclaw-weixin、wechaty 生态、chatgpt-on-wechat(中文社区最大微信 AI bot)、Telegram/Discord 可编辑平台对照。</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>项目</th><th>长回复处理</th><th>发送节奏 / 限流</th><th>对我们的借鉴</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>openclaw-weixin</b><br><span style="color:var(--ink-3)">(上游官方)</span></td>
+            <td>整段一次发,无分片。官方 OpenClaw 核心有 "chunking contract"(渠道级块级发送),<b>但微信插件未实现</b>——issue #165 公开承认"长文本回复缺可靠分块,微信侧易截断/失败"</td>
+            <td>社区配置模拟人工打字:<code>typing_delay_ms: 850</code>、<code>chunk_size: 8</code>;核心层对 429/超时指数退避重试</td>
+            <td>官方也没解决,且官方方向就是"块级发送"非逐 token——我们的 80 字符阈值比所有同行的分片粒度都小</td>
+          </tr>
+          <tr>
+            <td><b>wechaty 生态</b></td>
+            <td>社区共识:<b>500 字符/段</b>保守分片(社区常用 1500–2000 但越接近上限越易被拒);Unicode 码点切分防劈 emoji/中文;优先在 <code>\n</code> 段落边界切</td>
+            <td>串行发送 + 间隔 300ms~1s;<b>禁止并发发分片</b>(微信乱序);分片预留余量(字节 vs 字符的坑)</td>
+            <td>验证了"500 字分片 + 段间间隔"是社区基准;我们的 flush 按行拆 + AGENTS.md 500 字约定与之一致</td>
+          </tr>
+          <tr class="hl">
+            <td><b>chatgpt-on-wechat</b><br><span style="color:var(--ink-3)">(最直接对标)</span></td>
+            <td><b>500 字分片</b>(行优先切,超长单行才按字符切);流式输出是"伪流式"——每段仍受 500 字约束,微信上多条消息蹦出</td>
+            <td><b>每会话队列</b>(Dequeue+信号量)串行保序;失败重试 2–3 次带 sleep,永久错误直接放弃;连发间隔 <b>0.5–1s</b> 防"操作频繁"</td>
+            <td>中文微信 bot 社区大规模验证的路线:聚合到语义块(500 字)+ 队列 + 间隔,而不是碎片流</td>
+          </tr>
+          <tr>
+            <td><b>底层 SDK</b><br><span style="color:var(--ink-3)">(openwechat / gewechat / wechatferry / wxauto)</span></td>
+            <td>全部裸发:<code>ReplyText</code> / <code>postText</code> / <code>send_text</code>,无分片无包装</td>
+            <td>无限流无重试——分片/限流/重试全部由应用层(CoW)负责</td>
+            <td>分片、队列、重试是我们网关层的职责,与生态一致</td>
+          </tr>
+          <tr>
+            <td><b>Telegram / Discord</b><br><span style="color:var(--ink-3)">(可编辑平台对照)</span></td>
+            <td>原地更新:先发占位 → edit 同一条,节流 500ms–1s 或 10–20 字 flush;超长切新消息并标注"…接续"</td>
+            <td>edit 限频(TG ~20 次/分,Discord 5 次/5s);markdown 未闭合是最大坑;消息失效 catch 后改发新消息</td>
+            <td>微信无编辑 → 可编辑方案不可行;对无编辑平台的框架共识是:<b>占位+全量</b> / 分片增量 / 队列合并 三选一</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:14px;color:var(--ink-2);margin-top:14px"><b>同行共识:</b>① 微信侧"流式 = 多条消息"是公认事实,但所有成熟项目都做<b>聚合到语义块</b>(500 字级)而非逐 token 碎片;② 发送靠<b>队列串行 + 段间间隔</b>保序防限流;③ 无编辑平台的体验取决于"首条消息多快 + 节奏稳不稳",占位先行是通用第一步。我们当前 80 字符阈值是全部对比项目中最碎的粒度。</p>
+  </section>
+
+  <section>
+    <h2>方案对比</h2>
+    <p class="sec-sub">四个方向不互斥——推荐 A+C 组合落地,呈现层收敛(D)作为配套。</p>
+
+    <div class="bubbles">
+      <div class="bubble-panel">
+        <h3>现在:碎片 + 截断</h3>
+        <p class="cap">一次 500 字回复的微信侧效果(示意)</p>
+        <div class="chat">
+          <div class="bubble user">成都天气怎么样?</div>
+          <div class="bubble">成都现在的天气:🌥️ 23.2°C(体感 27.2°C),<span class="meta">第 1/8 条 · 80 字符阈值触发</span></div>
+          <div class="bubble frag">阴天,湿度 87%</div>
+          <div class="bubble frag">,微风 1.6 km/h</div>
+          <div class="bubble sys">🧩 工具卡片:get_weather 已完成</div>
+          <div class="bubble frag">未来 3 天:</div>
+          <div class="bubble frag">· 8月20日:🌦️ 小阵雨,21~26°C</div>
+          <div class="bubble frag">· 8月21日:🌧️ 中毛毛雨</div>
+          <div class="bubble miss">· 8月22日:⛈️ 雷暴,23~30°C<span class="meta">第 8 条未送达 · ret=-2</span></div>
+          <div class="missing-line">⚠️ 连续失败 3 次 → 仅提示"发送通道异常",内容不补发</div>
+        </div>
+      </div>
+      <div class="bubble-panel">
+        <h3>目标:一条完整消息</h3>
+        <p class="cap">聚合缓冲 + 段落分段后的效果(示意)</p>
+        <div class="chat">
+          <div class="bubble user">成都天气怎么样?</div>
+          <div class="bubble sys">⏳ 生成中(typing 状态,无文本消息)</div>
+          <div class="bubble big">成都现在的天气:🌥️ 23.2°C(体感 27.2°C),阴天,湿度 87%,微风 1.6 km/h<br><br>未来 3 天:<br>· 8月20日:🌦️ 小阵雨,21 ~ 26°C<br>· 8月21日:🌧️ 中毛毛雨,21 ~ 30°C<br>· 8月22日:⛈️ 雷暴,23 ~ 30°C<br><br>总结:阴湿天气,湿度高,出门带伞 ☔<span class="meta">单条 &lt;2048 字符 · 一次发送 · 段间无失败窗口</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="option">
+      <div class="head">
+        <span class="name">A · 聚合缓冲,一次成文</span>
+        <span class="verdict"><span class="pill ok">推荐主方案</span></span>
+      </div>
+      <p>生成期间只累积 + 保持"正在输入",agent 完成后统一发送。≤2048 字符直接一条;超长按语义段落拆 2–3 条,段间间隔 300–500ms。</p>
+      <ul>
+        <li>微信里是一条完整消息,阅读性最高</li>
+        <li>发送次数骤降(1–3 条 vs 6–8 条),不再撞高频限流,"截断"根因消失</li>
+        <li>同行依据:Telegram/Discord 生态对"无编辑平台"的框架共识第一推荐就是"占位+全量"(nonebot/koishi 等);官方 OpenClaw 的 chunking contract 同样是块级发送</li>
+        <li>超长回复(实测罕见,模型被 AGENTS.md 约束在短回复)可分段兜底</li>
+      </ul>
+      <p class="cons"><b>代价:</b>失去"逐步生成"的流式体验——微信场景下用户看的是完整消息,此价值很低;生成期用户看到的是 typing,长任务(文生图 ~60s)需保留占位。</p>
+    </div>
+
+    <div class="option">
+      <div class="head">
+        <span class="name">B · 段落感知分段 + 节流</span>
+        <span class="verdict"><span class="pill mid">保守渐进</span></span>
+      </div>
+      <p>保留流式:阈值提到 500 字符(与 AGENTS.md、chatgpt-on-wechat 一致),按句号/段落切分,每会话串行队列 + 段间 sleep 0.5–1s(CoW 实测间隔),Unicode 码点切分防劈 emoji。</p>
+      <ul>
+        <li>chatgpt-on-wechat 在中文社区大规模验证的路线:500 字分片 + 队列 + 间隔</li>
+      </ul>
+      <p class="cons"><b>结论:</b>可作 A 的降级模式(用户偏好流式时),或 A 中超长回复的分段实现——不单独作为主方案。</p>
+    </div>
+
+    <div class="option">
+      <div class="head">
+        <span class="name">C · 发送可靠性层</span>
+        <span class="verdict"><span class="pill ok">必须配套</span></span>
+      </div>
+      <p>与 A/B 叠加,专治"截断"残留风险:</p>
+      <ul>
+        <li><b>ret=-2 分流</b>(api.ts:517 目前一律 throw):<code>rate limited</code> → 指数退避(1s/2s/4s);<code>prepare failed</code>/裸 -2 → 不盲目重试,标记 context 过期,提示"请先给机器人发一条消息刷新会话"</li>
+        <li><b>失败补发队列</b>:未送达片段暂存,通道恢复后自动补发(不只发一条兜底提示)</li>
+        <li><b>发送前长度检查</b>:&gt;2000 字符强制按段落切;Unicode 码点切分,预留字节余量(含 emoji/中文时 2048 字节 ≈ 700 汉字)</li>
+        <li><b>速率控制</b>:每会话串行队列保序(CoW 模式),段间 0.5–1s,峰值 ≤8 条/分钟,超限排队延迟发送;重试 2–3 次带 sleep,永久错误直接放弃</li>
+      </ul>
+    </div>
+
+    <div class="option">
+      <div class="head">
+        <span class="name">D · 呈现层收敛</span>
+        <span class="verdict"><span class="pill mid">配套</span></span>
+      </div>
+      <ul>
+        <li>工具卡片默认关闭(<code>replyProgressMessages: false</code>),或仅长任务开启——卡片穿插是碎片感的重要来源</li>
+        <li>文生图占位策略:生成期间发一次"正在生成,约 1 分钟"且聚合模式不叠加碎片;图片到达后一条"画好了:<span class="mono">[image:…]</span>"消息收尾</li>
+        <li>AGENTS.md 强化:单次回复目标 ≤1500 字符、必含"结论"首句——从源头控制长度,聚合后天然一条</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>推荐落地路线</h2>
+    <p class="sec-sub">按"改动小 → 见效快 → 再加固"排序,每阶段独立可测可发布。</p>
+    <div class="roadmap">
+      <div class="step">
+        <div class="stage">阶段 1</div>
+        <div class="body">
+          <h3>聚合模式 + 长度保护 + 节流(核心修复)</h3>
+          <p>WeixinStreamingSender 增加聚合模式:流式期间只喂 filter 缓存、不发微信;完成后一次发送(超长按段落切,段间 300ms)。非聚合模式保留现状。</p>
+          <ul>
+            <li>80 阈值碎片 → 1–3 条完整消息,"截断"主根因消除</li>
+            <li>发送前 >2000 字符强制分段(2048 上限保护)</li>
+          </ul>
+          <div class="files">文件:src/weixin/streaming-sender.ts · src/weixin/driver.ts · src/weixin/config-schema.ts(回复模式配置)</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="stage">阶段 2</div>
+        <div class="body">
+          <h3>ret=-2 分流 + 失败补发</h3>
+          <p>api.ts 对 ret=-2 按 errmsg 分流:限流退避重试;context 失效则停止重试并提示用户发一条消息刷新会话。未送达文本进补发队列。</p>
+          <div class="files">文件:src/weixin/api/api.ts · src/weixin/streaming-sender.ts(补发队列)</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="stage">阶段 3</div>
+        <div class="body">
+          <h3>呈现收敛 + 契约强化</h3>
+          <p>工具卡片默认关闭;占位消息与聚合模式协调;AGENTS.md 明确"回复 ≤1500 字符、结论先行"。</p>
+          <div class="files">文件:src/weixin/gateway.ts(reply-progress 装配)· AGENTS.md · docs/features.md</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>验证方法</h2>
+    <ul>
+      <li><b>单测</b>:streaming-sender 聚合模式的拆分/分段/超长用例(vitest,不依赖微信)</li>
+      <li><b>实测</b>:向机器人发"详细分析……"类长问题,确认微信收到 1–3 条完整消息、无 ret=-2;连续 10 轮验证频率限制不再触发</li>
+      <li><b>回归</b>:媒体标记(<span class="mono">[image:]</span>)、单词截断保护、flush 尾文在聚合模式下行为不变</li>
+    </ul>
+  </section>
+
+  <footer class="footer">
+    <span>基于 2026-08-24 代码与 8/21 网关日志 + 腾讯 openclaw-weixin issue 调研</span>
+    <span>关键文件:streaming-sender.ts · driver.ts · api.ts · bridge.ts</span>
+  </footer>
+
+</div>

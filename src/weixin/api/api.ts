@@ -513,8 +513,39 @@ export async function sendMessage(
   });
   const resp: SendMessageResp = JSON.parse(rawText);
   if (resp.ret && resp.ret !== 0) {
-    throw new Error(
-      `sendMessage ret=${resp.ret} errmsg=${resp.errmsg ?? "(none)"}`,
+    throw new SendMessageError(resp.ret, resp.errmsg ?? "");
+  }
+}
+
+/**
+ * sendmessage 错误（带 ret / errmsg 分类，供发送层分流重试策略）。
+ *
+ * ret=-2 的 errmsg 语义（调研，腾讯 openclaw issue #81/#142）：
+ * - "rate limited" → 真限流（瞬态，可指数退避重试）
+ * - "prepare failed" / 裸 -2 → context_token 过期/会话级失效（重试大概率
+ *   持续失败；须用户先给机器人发一条消息刷新 context，或重新扫码）
+ */
+export class SendMessageError extends Error {
+  readonly ret: number;
+  readonly errmsg: string;
+
+  constructor(ret: number, errmsg: string) {
+    super(`sendMessage ret=${ret} errmsg=${errmsg || "(none)"}`);
+    this.name = "SendMessageError";
+    this.ret = ret;
+    this.errmsg = errmsg;
+  }
+
+  /** 是否可重试的瞬态限流（指数退避后有望成功）。 */
+  get retryable(): boolean {
+    return this.ret === -2 && this.errmsg === "rate limited";
+  }
+
+  /** 是否 context/会话级失效（重试无意义，须用户入站消息刷新或重扫码）。 */
+  get contextFrozen(): boolean {
+    return (
+      this.ret === -2 &&
+      (this.errmsg === "" || this.errmsg === "prepare failed" || this.errmsg === "invalid context")
     );
   }
 }

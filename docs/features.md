@@ -39,10 +39,13 @@
 | 会话模式 | `room`（默认，所有用户共享一个会话）/ `per-user`（每用户独立隔离）；CLI `--session-mode`、daemon 脚本 `MODE` 可配 | 0.1.x |
 | 会话跨重启恢复 | `SessionRouter.getSession` 优先 `resume` 持久化会话（stable sessionId = room key / userId，按 id 跨根定位），失败回退新建；headless profile 装配 `dsh-session-persistence-jsonl`（`~/.dsh/sessions/<projectKey>/<sessionId>/session.jsonl.zstd`），daemon 重启后实测恢复成功（日志 `resumed persisted session for room`） | 0.1.x |
 | 流式渐进回复 | 文本增量按阈值（80 字符）分段实时发送，用户在微信看到"逐步生成"；markdown 安全分片（不劈开结构标记） | 0.1.x → 0.3.4 |
+| 聚合回复模式 | 默认 `aggregate`：生成期间只累积+"正在输入"，完成后统一发送（≤1500 字符一条成文；超长按段落切 500 字/段 + 段间 500ms 节流），防碎片与高频连发被拒；`DSH_WEIXIN_REPLY_MODE=stream` 回退流式 | 0.5.1 |
+| 聚合超时占位 | 聚合模式 25s 未完成发一次"还在生成，请稍候～"（最多一次，文生图占位不重复） | 0.5.1 |
 | 单词截断保护 | 分段阈值触发时，不完整拉丁单词（如 "km" 等待 "/h"）留在缓存，防止 "km/h" 被劈成两段 | 0.4.1 |
 | markdown 全剥离 | 发送前 StreamingMarkdownFilter 剥离全部 markdown 语法（表格→纯文本行、粗体/斜体/行内代码/代码块/标题/分隔线/引用，内容保留）——微信不渲染 markdown | 0.4.0 |
 | 格式契约 | AGENTS.md 自动注入 agent：纯文本 + emoji、结论先行、常用模板（天气/画图/问答）few-shot | 0.4.0 |
 | 发送失败兜底 | 流式发送连续失败 ≥3 次 → 主动回复"⚠️ 消息发送通道出现异常"，不静默丢回复 | 0.4.0 |
+| 发送失败分流 | `ret=-2` 按 errmsg 分流：`rate limited` → 指数退避重试（1s/2s/4s，恢复后自动补发）；`prepare failed`/裸 -2（context 失效）→ 首次即提示"请先给机器人发一条消息刷新会话"并停止重试；其他 → 连续失败 ≥3 次兜底提示 | 0.5.1 |
 | 消息处理两层超时 | 空闲超时（默认 180s，活动事件刷新计时，防 AI 网关挂起卡死）+ 整轮超时（默认 900s，防工具循环失控）；`OPENCLAW_ASK_IDLE_TIMEOUT_SEC` / `OPENCLAW_ASK_TIMEOUT_SEC` 可配 | 0.3.8 |
 | 正在输入提示 | 回复前经 getConfig 取 typing ticket 发送"正在输入"状态 | 0.1.x |
 | 文生图占位回复 | 工具调用时立即回"正在生成图片，大概需要 1 分钟"（生成期间无文本增量，避免干等） | 0.3.5 |

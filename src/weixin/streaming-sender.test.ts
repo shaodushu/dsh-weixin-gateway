@@ -8,14 +8,25 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { STUCK_THRESHOLD, WeixinStreamingSender } from './streaming-sender.js'
+import { SendMessageError } from './api/api.js'
+import {
+  AGGREGATE_SEGMENT_MAX,
+  AGGREGATE_SINGLE_MAX,
+  STUCK_THRESHOLD,
+  WeixinStreamingSender,
+  splitAggregate,
+} from './streaming-sender.js'
 
 /** 构造发送器：收集 sendText 发出的文本，返回 { sender, sent }。 */
-function makeSender() {
+function makeSender(opts?: { mode?: 'stream' | 'aggregate' }) {
   const sent: string[] = []
-  const sender = new WeixinStreamingSender(async (text) => {
-    sent.push(text)
-  })
+  const sender = new WeixinStreamingSender(
+    async (text) => {
+      sent.push(text)
+    },
+    undefined,
+    { ...opts, intervalMs: 0, retryBaseMs: 0 }, // 测试中段间隔/重试间隔置 0，避免慢测
+  )
   return { sender, sent }
 }
 
@@ -197,6 +208,196 @@ describe('WeixinStreamingSender', () => {
     sender.feed(text)
     const r = await sender.flush()
     expect(sent.join('') + r.textParts.join('')).toBe(text)
+  })
+})
+
+describe('splitAggregate 聚合分段（纯函数）', () => {
+  it('短文本（≤1500 码点）一条成文不拆', () => {
+    const text = '结论：成都今天阴天。'.repeat(50) // 700 字 < 1500
+    expect(splitAggregate(text)).toEqual([text])
+  })
+
+  it('空输入 → 空数组', () => {
+    expect(splitAggregate('')).toEqual([])
+    expect(splitAggregate('   \n ')).toEqual([])
+  })
+
+  it('超长无换行文本按 500 码点硬切，不劈 emoji/中文', () => {
+    const seg = '🌧️成都'.repeat(75) // 300 码点
+    const long = seg.repeat(6) // 1800 码点 > 1500
+    const parts = splitAggregate(long)
+    expect(parts.length).toBeGreaterThan(1)
+    // 拼接无损
+    expect(parts.join('')).toBe(long)
+    // 每段 ≤ 500 码点（按 Unicode 码点计，不劈 emoji）
+    for (const p of parts) expect(Array.from(p).length).toBeLessThanOrEqual(AGGREGATE_SEGMENT_MAX)
+    // 不以半个 emoji 开头/结尾（🌧️ 是 U+1F327 + U+FE0F，被劈开时 join 会乱）
+    expect(parts[0]).toMatch(/^🌧️/)
+  })
+
+  it('段落边界优先：含换行文本在段落间切', () => {
+    const line = '结论：这条消息有点长，按段落切开。'.repeat(4) // ~160 码点
+    const text = [line, line, line, line].join('\n') // 4 段 ~640 码点,>500
+    const parts = splitAggregate(text)
+    expect(parts.join('\n')).toBe(text) // 段落结构保留
+    expect(parts.every((p) => Array.from(p).length <= AGGREGATE_SEGMENT_MAX)).toBe(true)
+  })
+
+  it('段内 trim：首尾空白不残留', () => {
+    const text = '  '.concat('a'.repeat(AGGREGATE_SINGLE_MAX + 100), '  ')
+    const parts = splitAggregate(text)
+    expect(parts.join('')).toBe('a'.repeat(AGGREGATE_SINGLE_MAX + 100))
+  })
+})
+
+describe('WeixinStreamingSender 聚合模式', () => {
+  it('feed 只累积不发送，flush 后一条成文发出（textParts 空防重复）', async () => {
+    const { sender, sent } = makeSender({ mode: 'aggregate' })
+    sender.feed('结论：成都今天阴天，')
+    sender.feed('湿度 87%，')
+    sender.feed('出门记得带伞 ☔')
+    // 累积超过 80 字符阈值也不发
+    expect(sent).toEqual([])
+    const r = await sender.flush()
+    expect(sent).toEqual(['结论：成都今天阴天，湿度 87%，出门记得带伞 ☔'])
+    expect(r.textParts).toEqual([])
+    expect(r.ttsText).toBeUndefined()
+  })
+
+  it('聚合模式媒体标记仍正常提取（前缀文本 flush 统一发出）', async () => {
+    const { sender, sent } = makeSender({ mode: 'aggregate' })
+    sender.feed('画好了：\n[image:/tmp/a.png]')
+    const r = await sender.flush()
+    expect(r.mediaParts).toEqual([{ path: '/tmp/a.png', caption: '' }])
+    expect(sent).toEqual(['画好了：'])
+  })
+
+  it('聚合模式超长回复分段发送（多段且内容无损）', async () => {
+    const { sender, sent } = makeSender({ mode: 'aggregate' })
+    const text = '这是一段用于验证聚合分段的中文内容，确保超长回复不会变成碎片也不会被截断。'.repeat(25) // ~1375 码点
+    sender.feed(text)
+    const r = await sender.flush()
+    expect(sent.join('')).toBe(text)
+    expect(r.textParts).toEqual([])
+    // 与 splitAggregate 结果一致（≤1500 一条成文）
+    expect(sent).toEqual([text])
+  })
+
+  it('聚合模式超长（>1500）按 splitAggregate 分多条', async () => {
+    const { sender, sent } = makeSender({ mode: 'aggregate' })
+    const text = '超长内容'.repeat(AGGREGATE_SINGLE_MAX) // 6000 码点
+    sender.feed(text)
+    const r = await sender.flush()
+    expect(sent.join('')).toBe(text)
+    expect(r.textParts).toEqual([])
+    expect(sent.length).toBeGreaterThan(1)
+    for (const p of sent) expect(Array.from(p).length).toBeLessThanOrEqual(AGGREGATE_SEGMENT_MAX)
+  })
+
+  it('[tts:] 在聚合模式并入文本统一发送（不单独返回）', async () => {
+    const { sender, sent } = makeSender({ mode: 'aggregate' })
+    sender.feed('[tts:你好呀]\n文字回复')
+    const r = await sender.flush()
+    expect(r.ttsText).toBeUndefined()
+    expect(r.textParts).toEqual([])
+    expect(sent).toEqual(['你好呀\n文字回复'])
+  })
+})
+
+describe('发送失败分流（阶段2：ret=-2 分流 + 重试）', () => {
+  it('rate limited 限流错误指数退避重试，恢复后内容完整补发', async () => {
+    let attempts = 0
+    const sent: string[] = []
+    const sender = new WeixinStreamingSender(
+      async (text) => {
+        attempts++
+        if (attempts < 3) throw new SendMessageError(-2, 'rate limited')
+        sent.push(text)
+      },
+      () => {
+        throw new Error('onStuck 不应触发')
+      },
+      { retryBaseMs: 0 },
+    )
+    sender.feed('一'.repeat(100))
+    await sender.flush()
+    expect(attempts).toBe(3) // 2 次重试 + 1 次成功
+    expect(sent.join('')).toBe('一'.repeat(100))
+  })
+
+  it('限流重试 3 次耗尽后计入失败，连续 3 次触发 onStuck(rate)', async () => {
+    const reasons: string[] = []
+    const sender = new WeixinStreamingSender(
+      async () => {
+        throw new SendMessageError(-2, 'rate limited')
+      },
+      (reason) => reasons.push(reason),
+      { retryBaseMs: 0 },
+    )
+    for (let i = 0; i < STUCK_THRESHOLD; i++) {
+      sender.feed('一'.repeat(100))
+      await sender.flush()
+    }
+    expect(reasons).toEqual(['rate'])
+  })
+
+  it('context 冻结（prepare failed）首次即触发 onStuck(context)，后续分片跳过发送', async () => {
+    const reasons: string[] = []
+    let sendCalls = 0
+    const sender = new WeixinStreamingSender(
+      async () => {
+        sendCalls++
+        throw new SendMessageError(-2, 'prepare failed')
+      },
+      (reason) => reasons.push(reason),
+      { retryBaseMs: 0 },
+    )
+    for (let i = 0; i < 5; i++) {
+      sender.feed('一'.repeat(100))
+      await sender.flush()
+    }
+    // 首次失败即提示，后续不再打 API（不盲目重试）
+    expect(reasons).toEqual(['context'])
+    expect(sendCalls).toBe(1)
+  })
+
+  it('裸 -2（errmsg 空）同样判为 context 冻结', async () => {
+    const reasons: string[] = []
+    const sender = new WeixinStreamingSender(
+      async () => {
+        throw new SendMessageError(-2, '')
+      },
+      (reason) => reasons.push(reason),
+      { retryBaseMs: 0 },
+    )
+    sender.feed('一'.repeat(100))
+    await sender.flush()
+    expect(reasons).toEqual(['context'])
+  })
+
+  it('普通错误（无 ret 信息）→ reason=other，按 3 次计数触发', async () => {
+    const reasons: string[] = []
+    const sender = new WeixinStreamingSender(
+      async () => {
+        throw new Error('network down')
+      },
+      (reason) => reasons.push(reason),
+      { retryBaseMs: 0 },
+    )
+    for (let i = 0; i < STUCK_THRESHOLD; i++) {
+      sender.feed('一'.repeat(100))
+      await sender.flush()
+    }
+    expect(reasons).toEqual(['other'])
+  })
+
+  it('SendMessageError 分类：rate limited=retryable，prepare failed/裸-2=contextFrozen', () => {
+    expect(new SendMessageError(-2, 'rate limited').retryable).toBe(true)
+    expect(new SendMessageError(-2, 'rate limited').contextFrozen).toBe(false)
+    expect(new SendMessageError(-2, 'prepare failed').retryable).toBe(false)
+    expect(new SendMessageError(-2, 'prepare failed').contextFrozen).toBe(true)
+    expect(new SendMessageError(-2, '').contextFrozen).toBe(true)
+    expect(new SendMessageError(-14, '').contextFrozen).toBe(false)
   })
 })
 
