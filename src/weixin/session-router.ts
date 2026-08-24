@@ -17,7 +17,9 @@
  * 有效就 dispose+resume 重建会话（融入 web 新事件），损坏则截断到有效前缀
  * （见 session-sync.ts）再重建——修复双写 seq 错位导致的 corrupt session log。
  */
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import type { BigIntStats } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentHandle } from '@deepseek-ai/dsh-agent'
@@ -25,6 +27,7 @@ import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 export type SessionMode = 'per-user' | 'room'
 import { createGatewayAgent, resumeGatewayAgent } from '../bridge.js';
 import { logger } from './util/logger.js';
+import { loadEnvFile } from './ai-config.js';
 import { decompressAllFrames, scanAndRepairSessionLog } from './session-sync.js';
 /** 房间模式的统一会话 key。 */
 const ROOM_KEY = '__room__';
@@ -45,6 +48,8 @@ export class SessionRouter {
     private readonly roomKey: string
     /** 各会话文件最近一次成功同步的 revision（写前同步用）。 */
     private readonly syncedRevisions = new Map<string, string>()
+    /** 定时自愈定时器（每 30s 检查会话文件，损坏时截断修复——网关进程内串行，安全）。 */
+    private healTimer: ReturnType<typeof setInterval> | undefined
     constructor(
     ctx: Context,
     mode: SessionMode, 
@@ -60,6 +65,38 @@ export class SessionRouter {
         this.mode = mode;
         this.roomKey = roomKey;
         logger.info(`session-router: mode=${mode}`);
+        // 定时自愈：web attach 写入与网关写入的竞态会周期性损坏会话文件
+        // （seq 错位差 1），每 30s 检查一次，损坏即截断修复；网关进程内串行
+        // 执行，不与自身写入竞争（web 侧 repair 会并发覆盖丢数据，已弃用）。
+        this.healTimer = setInterval(() => void this.healRoomFile(), 30_000);
+    }
+    /** 定时自愈：扫描 __room__ 文件，损坏时截断到有效前缀；修复后强制下次 resync。 */
+    private async healRoomFile() {
+        if (this.mode !== 'room')
+            return;
+        let file;
+        try {
+            const located = this.ctx
+                .get('sessionPersistence')
+                ?.locate({ cwd: this.cwd ?? process.cwd(), id: this.roomKey });
+            file = located?.path;
+        }
+        catch {
+            return;
+        }
+        if (file === undefined)
+            return;
+        try {
+            const scan = await scanAndRepairSessionLog(file);
+            if (scan.outcome === 'repaired') {
+                logger.warn(`session-router: periodic heal repaired ${this.roomKey} (kept ${scan.validEvents} events)`);
+                // 文件被截断修复 → 强制下次 getSession 重新同步（重建会话）
+                this.syncedRevisions.delete(this.roomKey);
+            }
+        }
+        catch (err) {
+            logger.warn(`session-router: periodic heal failed for ${this.roomKey}: ${String(err)}`);
+        }
     }
     /** 取某用户的 agent 会话：优先恢复持久化会话，否则新建。 */
     async getSession(userId: string) {
@@ -86,12 +123,27 @@ export class SessionRouter {
             if (initial !== undefined)
                 this.syncedRevisions.set(key, initial);
             await this.applyNicknameTitle(key, handle);
+            await this.touchSyncSignal(handle.agent.session.seq);
             return handle;
         }
         // 写前同步：文件被外部（web 端）修改时重建会话融入新事件
         await this.resync(key, handle);
         await this.applyNicknameTitle(key, handle);
+        await this.touchSyncSignal(handle.agent.session.seq);
         return handle;
+    }
+    /**
+     * 写入同步信号文件（~/.dsh/room-sync-signal）：内容为 room+当前会话 seq，
+     * web 端插件 watch 它并比对 seq（有增量才刷新/推送）。每次消息处理触发一次。
+     */
+    private async touchSyncSignal(seq?: number) {
+        try {
+            const path = join(homedir(), '.dsh', 'room-sync-signal');
+            await writeFile(path, `room=${this.roomKey},seq=${seq ?? ''}\n`);
+        }
+        catch {
+            // 信号写入失败不阻断消息处理
+        }
     }
     /**
      * 应用微信用户昵称标题（setup 引导配置的 WEIXIN_USER_NICKNAME）：
@@ -99,16 +151,15 @@ export class SessionRouter {
      * 失败仅告警，不阻断消息处理。
      */
     private async applyNicknameTitle(key: string, handle: AgentHandle) {
+        // 网关进程不预载 .env（AI 配置是"用时加载"），先加载一次（幂等，不覆盖已存在变量）
+        loadEnvFile();
         const nickname = process.env.WEIXIN_USER_NICKNAME?.trim();
         if (!nickname)
-            return;
-        const titles = this.ctx.get('sessionTitle');
-        if (titles === undefined || typeof titles.rename !== 'function')
             return;
         let file;
         try {
             const located = this.ctx
-                .get('session-persistence-jsonl')
+                .get('sessionPersistence')
                 ?.locate({ cwd: this.cwd ?? process.cwd(), id: key });
             file = located?.path;
         }
@@ -135,7 +186,19 @@ export class SessionRouter {
             }
             if (last === nickname)
                 return;
-            await titles.rename(handle.agent.session, nickname);
+            // 直接 append session/title 事件（不依赖 sessionTitle 服务的 rename——
+            // 网关进程里该服务不可用/时机不稳；事件格式照抄现有 title 事件）。
+            // 签名断言：dsh-session 的 SessionEventMap 类型定义落后于运行时（title 事件合法）。
+            // 必须 bind 保持 this（解构后 this 丢失 → this.log undefined 报错，实测 0.5.8）。
+            const appendTitle = handle.agent.session.append.bind(handle.agent.session) as (
+              type: string,
+              data: unknown,
+            ) => void;
+            appendTitle('session/title', {
+                title: nickname,
+                messageSeqs: [],
+                source: { kind: 'user' },
+            });
             logger.info(`session-router: applied nickname title for ${key}: ${nickname}`);
         }
         catch (err) {
@@ -151,7 +214,7 @@ export class SessionRouter {
         let file;
         try {
             const located = this.ctx
-                .get('session-persistence-jsonl')
+                .get('sessionPersistence')
                 ?.locate({ cwd: this.cwd ?? process.cwd(), id: key });
             file = located?.path;
         }
@@ -190,7 +253,8 @@ export class SessionRouter {
         try {
             fresh = await resumeGatewayAgent(this.ctx, key);
         }
-        catch {
+        catch (err) {
+            logger.warn(`session-router: resync resume failed for ${label}: ${err instanceof Error ? err.message : String(err)}`);
             fresh = undefined;
         }
         if (!fresh) {
@@ -234,6 +298,10 @@ export class SessionRouter {
     }
     /** 关闭全部会话。 */
     async disposeAll(): Promise<void> {
+        if (this.healTimer !== undefined) {
+            clearInterval(this.healTimer);
+            this.healTimer = undefined;
+        }
         for (const [key, handle] of this.handles) {
             await handle.dispose().catch((err) => {
                 logger.warn(`session-router: dispose ${key} failed: ${String(err)}`);
