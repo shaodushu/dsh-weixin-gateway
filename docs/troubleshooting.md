@@ -70,3 +70,36 @@
 ## 其他实测约束
 
 - **`ilink_appid: "bot"` 必须**在 package.json（`readPackageJsonFromDir` 向上查找），否则消息路由异常。
+
+## 症状：web 聊天报 "Cannot read properties of undefined (reading 'prepare')"（工具执行崩溃）
+
+**原因**：web profile 的 node_modules 里出现 @deepseek-ai 第二物理副本（插件依赖链带入，
+如 dsh-host-apiproxy 的依赖树），`TOOL_RUNTIME_SCHEDULER` Symbol 分裂——tools 插件与
+agent-loop 解析到不同副本，`ctx.tools[symbol]` undefined。
+
+**解决**：把 profile 的 `node_modules/@deepseek-ai/*` 全部 symlink 回全局 dsh bundle 的
+对应包（同版本兼容）；**web profile 插件禁止引入 @deepseek-ai 依赖**。
+
+## 症状：域名访问 web 报 TLS 连接被重置（同 IP 直连正常）
+
+**原因**：域名未备案被网络层 SNI 拦截（判别：同 IP 下 `curl https://IP -k` 通、
+`curl https://域名 --resolve IP` 被 reset）。
+
+**解决**：备案（腾讯云 beian.cloud.tencent.com，1-2 周）；临时用 IP + 自签证书
+（/etc/nginx/ssl/ip-selfsigned.crt，SAN 含 IP，浏览器装信任后 WebSocket 也可用）。
+
+## 症状：微信长回复被截断/全部失败（短回复正常）
+
+**原因**：stream 模式（80 字符阈值增量发送）长回复高频连发触发 ilink 风控
+（`sendMessage ret=-2 prepare failed`）；0.5.0/0.5.1 发布版无 aggregate 模式。
+
+**解决**：升级 0.5.2+（aggregate 模式：聚合 + 500 字分片 + 500ms 间隔）。
+鉴别：日志 `flush textParts=` 有内容 = stream 模式；`aggregate reply sent` = 正常。
+
+## 症状：`__room__` 会话文件反复损坏（seq gap 差 1）
+
+**原因**：web attach 会话写 end-seed/title 与网关写入的竞态（读快照后网关插入，
+写位置错位）；两个进程共享一个会话文件的固有矛盾（seq==位置索引契约，单写者）。
+
+**解决**：网关 0.5.1+ 写前同步 + 0.5.10 定时自愈（30s 截断修复）；
+web 端禁止对共享文件做 repair（并发重写会丢网关写入，实测）。

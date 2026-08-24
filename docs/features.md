@@ -111,6 +111,18 @@
 | 发布前测试 | `scripts/test-publish.sh`：单测 → 构建 → 打包 → 隔离安装 → bin → 会话路由 → setup 链路 |
 | CI | GitHub Actions：typecheck + build（main 分支 + PR） |
 | 配套插件 | `plugins/dsh-weather-cn`（0.1.2）：天气查询工具插件，随网关安装（修复 dsh-tools 双实例崩溃） |
+| 配套插件 | `plugins/dsh-settings-remote`（0.0.6）：web 设置页 loopback 门控绕过（settings.* 与 credentials.* 放行，见 troubleshooting） |
+| 配套插件 | `plugins/dsh-room-projection-sync`（0.0.1）：web 端 __room__ 投影缓存实时刷新（seq 信号 + fs.watch） |
+
+### 10. 会话共享与实时同步（0.5.1-0.5.13）
+
+| 功能 | 说明 |
+|---|---|
+| 写前同步（0.5.1） | 网关每次处理消息前扫描会话文件 revision，被 web 端修改则重建会话融入新事件；损坏自动截断修复（`session-sync.ts`） |
+| 定时自愈（0.5.10） | 网关每 30s 扫描会话文件，损坏即截断重建（web attach 写入与网关写入的竞态兜底） |
+| 昵称引导（0.5.3-0.5.9） | `dsh-weixin setup` 引导配置微信用户昵称（WEIXIN_USER_NICKNAME），网关自动设为 __room__ 会话标题（web 端可识别） |
+| web 查看微信历史 | __room__ 会话经 bind mount 挂入 web 会话目录；列表层投影缓存由插件实时刷新（seq 信号，秒级） |
+| 消息层同步 | 10 分钟定时重启 web（systemd timer dsh-web-refresh）重建会话对象；"打开状态下自动推送"受 dsh 内核限制（见边界表） |
 
 ## 二、待实现功能
 
@@ -132,3 +144,4 @@
 | 主动推送需先建立会话 | 用户需先给机器人发过消息（context token 落盘）；`--to all` 只发给活跃用户 |
 | cron 错过不补发 | 触发点错过 10 分钟宽限窗口即跳过（网关停机期间），设计如此 |
 | dsh 为 0.1.0-rc 预发布 | 上游接口可能破坏性变更，升级 dsh 后需回归测试 |
+| web 打开状态下自动推送新消息 | dsh 内核无跨进程事件注入通道（前端 WebSocket 推送源=宿主进程内事件流），插件侧拿不到会话对象引用（detach 不可行）——"打开即最新"靠 10 分钟定时重启 web；调研与后续方向见 `docs/archive/realtime-session-sync-research.md` |
