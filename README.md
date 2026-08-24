@@ -28,7 +28,7 @@ npx dsh-weixin-gateway@latest quickstart    # 一键：环境准备 + 扫码登�
 | 插件 | 用途 | npm |
 |---|---|---|
 | **dsh-weather-cn** | 中文天气查询工具（Open-Meteo，免 key） | `dsh-weixin-gateway setup` 自动随装 |
-| **dsh-settings-remote** | dsh web 设置平面（settings.\*）经域名反向代理可读可写 | `dsh plugin --profile web add dsh-settings-remote` |
+| **dsh-settings-remote** | dsh web 设置平面（settings.\*）经域名反向代理可读可写（[独立仓库](https://github.com/shaodushu/dsh-settings-remote)） | `dsh plugin --profile web add dsh-settings-remote` |
 
 ## 关键经验
 

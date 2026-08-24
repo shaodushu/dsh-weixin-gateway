@@ -1,6 +1,6 @@
 {
   "name": "dsh-settings-remote",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "dsh web 客户端插件：settings.* 配置平面（describe/update/replace/mutate/openDocument）在非 loopback 页面也可读可写——修复经域名反向代理访问时，模型/提供方目录页报 “settings are unavailable in this browser” 与 “/api/settings.mutate: HTTP 403”",
   "type": "module",
   "main": "lib/index.js",
@@ -17,8 +17,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shaodushu/dsh-weixin-gateway.git",
-    "directory": "plugins/dsh-settings-remote"
+    "url": "git+https://github.com/shaodushu/dsh-settings-remote.git"
   },
   "exports": {
     ".": {
@@ -42,5 +41,9 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-host-apiproxy": "0.1.0-rc.8"
+  },
+  "homepage": "https://github.com/shaodushu/dsh-settings-remote",
+  "bugs": {
+    "url": "https://github.com/shaodushu/dsh-settings-remote/issues"
   }
 }

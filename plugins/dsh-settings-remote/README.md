@@ -1,6 +1,6 @@
 # dsh-settings-remote
 
-> 随 [dsh-weixin-gateway](https://github.com/shaodushu/dsh-weixin-gateway) 仓库 `plugins/` 维护的独立 npm 包。
+> 独立 npm 包 / [GitHub 仓库](https://github.com/shaodushu/dsh-settings-remote)；与 [dsh-weixin-gateway](https://github.com/shaodushu/dsh-weixin-gateway) 配套，源码副本随其 `plugins/` 维护。
 
 dsh web 客户端插件：让 **settings.\* 配置平面**（`settings.describe` / `settings.update` / `settings.replace` / `settings.mutate` / `settings.openDocument`）在**非 loopback 页面也可读可写**。
 
