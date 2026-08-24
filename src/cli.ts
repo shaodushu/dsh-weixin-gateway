@@ -39,6 +39,7 @@ import {
   writeEnvFile,
 } from './weixin/ai-config.js'
 import type { AiCapabilityQuestions } from './weixin/ai-config.js'
+import { applyNicknameText, currentNickname, NICKNAME_ENV_KEY, nicknameEnvPath, writeNicknameEnv } from './weixin/nickname-config.js'
 import {
   applyDialogModelAnswers,
   buildDialogModelQuestions,
@@ -62,7 +63,7 @@ import { pushMessage } from './weixin/push.js'
 /** 固定使用的 profile 名。 */
 const PROFILE = 'headless'
 /** 与 package.json version 保持一致（更新版本时同步改这里）。 */
-const VERSION = '0.5.2'
+const VERSION = '0.5.3'
 
 /** 以继承 stdio 的方式转发给 dsh（二维码/配对码输入/Ctrl+C 都依赖继承），返回退出码。 */
 function runDsh(args: string[]): Promise<number> {
@@ -230,7 +231,7 @@ function printGatewayStatus(): void {
 }
 
 /** setup：检测/装 dsh → 建 profile+装插件 → 验证。幂等，可在已装环境重跑。 */
-async function setup(opts?: { skipAiConfig?: boolean; skipDialogModel?: boolean; skipSummary?: boolean }): Promise<void> {
+async function setup(opts?: { skipAiConfig?: boolean; skipDialogModel?: boolean; skipNickname?: boolean; skipSummary?: boolean }): Promise<void> {
   console.log('[dsh-weixin] 检测 dsh...')
   if (!detectDsh()) {
     console.log('[dsh-weixin] 未检测到 dsh，尝试全局安装 @deepseek-ai/dsh...')
@@ -290,6 +291,15 @@ async function setup(opts?: { skipAiConfig?: boolean; skipDialogModel?: boolean;
     }
   } else {
     console.log('[dsh-weixin] 跳过对话模型配置（后续可运行 dsh-weixin setup 单独补充）')
+  }
+
+  // 微信用户昵称（web 端会话标题）交互式引导；非 TTY 跳过
+  if (!opts?.skipNickname) {
+    try {
+      await configureNicknameInteractively()
+    } catch (err) {
+      console.error(`[dsh-weixin] 昵称配置引导未完成: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   if (opts?.skipSummary) {
@@ -447,6 +457,52 @@ async function askDialogFields(
     if (input !== '' && input !== f.defaultValue) {
       answers[f.id] = input
     }
+  }
+}
+
+/**
+ * 微信用户昵称引导：TTY 下询问昵称（已配置显示当前值，回车保持、输入新值覆盖；
+ * 直接回车跳过不改）。写入固定位置 .env（WEIXIN_USER_NICKNAME），网关用它给
+ * __room__ 会话设置标题（web 端会话列表可识别）。非 TTY（CI/管道）只打印指引。
+ */
+async function configureNicknameInteractively(): Promise<void> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    const cur = currentNickname()
+    console.log(
+      cur
+        ? `\n[dsh-weixin] 微信用户昵称已配置: ${cur}（非交互终端，跳过修改。可用环境变量 ${NICKNAME_ENV_KEY} 或编辑 ${nicknameEnvPath()}）`
+        : `\n[dsh-weixin] 非交互终端，跳过昵称配置。可用环境变量 ${NICKNAME_ENV_KEY} 或编辑 ${nicknameEnvPath()} 设置`,
+    )
+    return
+  }
+  loadEnvFile()
+  const cur = currentNickname()
+  console.log('\n🔧 微信用户昵称引导（显示在 web 端会话列表，方便识别微信对话）')
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  let nickname: string | undefined
+  try {
+    const prompt = cur
+      ? `当前昵称: ${cur}。直接回车保持，输入新昵称覆盖: `
+      : '输入微信用户昵称（直接回车跳过）: '
+    const input = (await rl.question(prompt)).trim()
+    if (input !== '') nickname = input
+  } finally {
+    rl.close()
+  }
+  if (nickname === undefined) {
+    console.log('\n[dsh-weixin] 昵称未修改')
+    return
+  }
+  const existing = fs.existsSync(nicknameEnvPath()) ? fs.readFileSync(nicknameEnvPath(), 'utf8') : ''
+  const next = applyNicknameText(existing, nickname)
+  if (next === existing) {
+    console.log('\n[dsh-weixin] 昵称无变化')
+  } else if (writeNicknameEnv(next)) {
+    console.log(`\n[dsh-weixin] 已写入昵称: ${nickname}（${nicknameEnvPath()}）`)
+    console.log('  网关重启后生效；已有会话下次收到消息时自动更新标题')
+  } else {
+    console.log(`\n[dsh-weixin] 无法写入 ${nicknameEnvPath()}（权限？），请手动添加：`)
+    console.log(`${NICKNAME_ENV_KEY}=${nickname}`)
   }
 }
 
