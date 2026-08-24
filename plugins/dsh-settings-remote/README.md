@@ -1,5 +1,7 @@
 # dsh-settings-remote
 
+> 随 [dsh-weixin-gateway](https://github.com/shaodushu/dsh-weixin-gateway) 仓库 `plugins/` 维护的独立 npm 包。
+
 dsh web 客户端插件：让 **settings.\* 配置平面**（`settings.describe` / `settings.update` / `settings.replace` / `settings.mutate` / `settings.openDocument`）在**非 loopback 页面也可读可写**。
 
 修复经域名反向代理访问 dsh web 时，模型/提供方目录页的两个报错：
