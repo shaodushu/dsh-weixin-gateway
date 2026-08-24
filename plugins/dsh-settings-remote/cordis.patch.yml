@@ -1,0 +1,8 @@
+# dsh-settings-remote bundle patch: inserts the settings-remote patch plugin.
+#
+# Mount into a profile automatically: `dsh plugin --profile web add dsh-settings-remote`
+# reconciles `dsh.profile.bundles` for packages that declare `dsh.bundle`.
+
+- insert:
+    - id: dsh-settings-remote
+      name: "dsh-settings-remote"
